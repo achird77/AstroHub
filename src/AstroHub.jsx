@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useContext, createContext, useMemo, useRef } from "react";
+import * as Tone from "tone";
 import {
   Sparkles, Users, Plus, Settings, X, ChevronDown, Moon, Sun, Star,
   Heart, Compass, Calendar, Clock, MapPin, Trash2, Orbit, Flame,
   Mountain, Wind, Droplets, Check, ArrowLeftRight, Wand2, NotebookPen,
-  Send, Copy, CalendarDays, TrendingUp,
+  Send, Copy, CalendarDays, TrendingUp, MessageCircle, Gem, CloudMoon,
+  Volume2, VolumeX, Image as ImageIcon, Sparkle, BrainCircuit,
 } from "lucide-react";
 
 /* ============================================================
@@ -507,6 +509,140 @@ function synastry(a, b) {
 }
 const SYN_COLOR = { Communication: "var(--air)", Romance: "var(--fire)", Friendship: "var(--earth)", Chaos: "var(--iris-soft)" };
 
+// --- Chinese zodiac --------------------------------------------
+const CN_ANIMALS = [
+  { name: "Monkey", emoji: "🐒", trait: "clever, playful, inventive" },
+  { name: "Rooster", emoji: "🐓", trait: "observant, candid, hardworking" },
+  { name: "Dog", emoji: "🐕", trait: "loyal, honest, protective" },
+  { name: "Pig", emoji: "🐖", trait: "generous, easygoing, sincere" },
+  { name: "Rat", emoji: "🐀", trait: "quick-witted, resourceful, charming" },
+  { name: "Ox", emoji: "🐂", trait: "dependable, patient, strong" },
+  { name: "Tiger", emoji: "🐅", trait: "brave, competitive, magnetic" },
+  { name: "Rabbit", emoji: "🐇", trait: "gentle, elegant, lucky" },
+  { name: "Dragon", emoji: "🐉", trait: "bold, ambitious, electric" },
+  { name: "Snake", emoji: "🐍", trait: "wise, intuitive, private" },
+  { name: "Horse", emoji: "🐎", trait: "free-spirited, energetic, warm" },
+  { name: "Goat", emoji: "🐐", trait: "creative, kind, calm" },
+];
+const CN_ELEMENTS = ["Metal", "Metal", "Water", "Water", "Wood", "Wood", "Fire", "Fire", "Earth", "Earth"];
+function chineseZodiac(birthDate) {
+  if (!birthDate) return null;
+  const y = new Date(birthDate + "T00:00:00").getFullYear();
+  if (isNaN(y)) return null;
+  return { ...CN_ANIMALS[((y % 12) + 12) % 12], element: CN_ELEMENTS[((y % 10) + 10) % 10], year: y };
+}
+
+// --- Crystal & ritual of the day -------------------------------
+const CRYSTALS = {
+  aries: { stone: "Carnelian", color: "Fiery Red" }, taurus: { stone: "Rose Quartz", color: "Soft Pink" },
+  gemini: { stone: "Citrine", color: "Sunlit Yellow" }, cancer: { stone: "Moonstone", color: "Pearl White" },
+  leo: { stone: "Tiger's Eye", color: "Gold" }, virgo: { stone: "Amazonite", color: "Sage" },
+  libra: { stone: "Lapis Lazuli", color: "Sky Blue" }, scorpio: { stone: "Obsidian", color: "Deep Black" },
+  sagittarius: { stone: "Turquoise", color: "Royal Purple" }, capricorn: { stone: "Garnet", color: "Charcoal" },
+  aquarius: { stone: "Amethyst", color: "Electric Violet" }, pisces: { stone: "Aquamarine", color: "Seafoam" },
+};
+const ELEMENT_RITUAL = {
+  Fire: "Light a candle and name one bold intention out loud.",
+  Earth: "Step outside, touch the ground, and list three things you're grateful for.",
+  Air: "Open a window, take five slow breaths, and write a single clear thought.",
+  Water: "Hold a glass of water, set a wish into it, then drink it mindfully.",
+};
+
+// --- Dream symbol decoder --------------------------------------
+const DREAM_SYMBOLS = {
+  water: "your emotions and the unconscious — calm or turbulent mirrors your inner state.",
+  ocean: "the vastness of feeling; you may be processing something larger than you can name.",
+  flying: "freedom and a desire to rise above a situation — or to escape it.",
+  falling: "a loss of control or fear of letting go; where are you gripping too tightly?",
+  teeth: "anxiety about appearance, power, or words you wish you could take back.",
+  snake: "transformation and hidden knowledge — something is shedding its old skin.",
+  house: "the self; different rooms are different parts of who you are.",
+  death: "endings that clear space for rebirth, rarely literal.",
+  chase: "something you're avoiding in waking life is asking to be faced.",
+  fire: "passion, anger, or rapid change burning away the old.",
+  money: "self-worth and energy exchange more than literal wealth.",
+  baby: "a new beginning, idea, or vulnerable part of yourself needing care.",
+  car: "your direction and control over life's pace.",
+  flowers: "growth, beauty, and emotional blossoming.",
+  storm: "released tension; a clearing is coming after the upheaval.",
+  mirror: "self-reflection and how you truly see yourself.",
+  door: "a choice or opportunity on your threshold.",
+  bird: "messages, perspective, and the longing for liberation.",
+  moon: "intuition and cycles; trust what you feel over what you see.",
+  star: "hope, guidance, and a wish quietly taking form.",
+};
+function decodeDream(text) {
+  if (!text.trim()) return null;
+  const low = text.toLowerCase();
+  const found = Object.keys(DREAM_SYMBOLS).filter((k) => low.includes(k));
+  if (found.length) return { symbols: found.slice(0, 4), generic: null };
+  const generic = ["The dream speaks in a private language — sit with the strongest feeling it left behind.",
+    "No fixed symbols, but the mood is the message; let it guide your day.",
+    "Your psyche is rearranging quietly. Note what lingered when you woke."];
+  return { symbols: [], generic: generic[hashString(low) % generic.length] };
+}
+
+// --- Cosmic weather (fused readout) ----------------------------
+function cosmicWeather(sign, profile) {
+  const score = sign ? composeHoroscope(sign, "daily", 0, profile?.name).score : 70;
+  const retros = RETROGRADES.filter((r) => r.status === "Retrograde").length;
+  const phase = moonPhase();
+  let icon, label, color;
+  if (retros >= 2) { icon = "⛈"; label = "Turbulent"; color = "var(--fire)"; }
+  else if (score >= 82 && retros === 0) { icon = "☀"; label = "Radiant"; color = "var(--gold-bright)"; }
+  else if (score >= 68) { icon = "⛅"; label = "Bright with clouds"; color = "var(--air)"; }
+  else if (retros === 1) { icon = "🌫"; label = "Hazy"; color = "var(--iris-soft)"; }
+  else { icon = "🌙"; label = "Quiet"; color = "var(--lavender)"; }
+  const note = `${phase.name.toLowerCase()} skies, energy at ${score}, ${retros ? `${retros} planet${retros > 1 ? "s" : ""} retrograde` : "no retrogrades"}.`;
+  return { icon, label, color, note, score };
+}
+
+// --- Ritual / streak storage -----------------------------------
+const RITUALS = [
+  { key: "reflect", label: "Reflect", icon: NotebookPen },
+  { key: "draw", label: "Draw a card", icon: Wand2 },
+  { key: "center", label: "Center yourself", icon: Sparkle },
+];
+function ritualKey(pid) { return `astrarium.ritual.${pid}`; }
+function loadRitual(pid) {
+  const raw = safeStorage.get(ritualKey(pid));
+  const base = { day: dayKey(0), done: {}, dates: [], longest: 0 };
+  if (!raw) return base;
+  try {
+    const r = JSON.parse(raw);
+    if (r.day !== dayKey(0)) r.done = {}; // new day resets today's checks
+    return { ...base, ...r, day: dayKey(0) };
+  } catch { return base; }
+}
+function saveRitual(pid, r) { safeStorage.set(ritualKey(pid), JSON.stringify(r)); }
+function computeStreak(dates) {
+  if (!dates || !dates.length) return 0;
+  const set = new Set(dates);
+  let streak = 0;
+  const d = new Date();
+  // allow today or yesterday as the anchor
+  if (!set.has(dayKey(0))) d.setDate(d.getDate() - 1);
+  while (set.has(d.toISOString().slice(0, 10))) { streak++; d.setDate(d.getDate() - 1); }
+  return streak;
+}
+
+// --- Mood × Moon aggregation -----------------------------------
+const PHASE_GROUP = (idx) => (idx === 0 ? "New" : idx < 4 ? "Waxing" : idx === 4 ? "Full" : "Waning");
+function moodMoonInsight(entries) {
+  if (!entries || entries.length < 3) return null;
+  const buckets = { New: {}, Waxing: {}, Full: {}, Waning: {} };
+  entries.forEach((e) => {
+    const m = moonData(new Date(e.date + "T12:00:00").getTime());
+    const g = PHASE_GROUP(m.idx);
+    buckets[g][e.mood] = (buckets[g][e.mood] || 0) + 1;
+  });
+  const summary = Object.entries(buckets).map(([phase, moods]) => {
+    const top = Object.entries(moods).sort((a, b) => b[1] - a[1])[0];
+    return { phase, mood: top ? top[0] : null, count: Object.values(moods).reduce((a, b) => a + b, 0) };
+  }).filter((s) => s.count > 0);
+  return summary.length ? summary : null;
+}
+
 // --- Safe storage (localStorage with in-memory fallback) -------
 const memStore = {};
 const safeStorage = {
@@ -522,56 +658,136 @@ const safeStorage = {
 const STORAGE_KEY = "astrarium.profiles.v1";
 
 // --- Context ---------------------------------------------------
+// --- Authentication (prototype, client-side) -------------------
+// NOTE: This is demo-grade auth for a single-file app. Accounts and
+// data live in the browser. For real security + cross-device sync,
+// swap safeStorage calls for a backend (Supabase / Firebase / your API).
+const USERS_KEY = "astrarium.users.v1";
+const SESSION_KEY = "astrarium.session.v1";
+const PW_SALT = "astrarium-salt";
+async function hashPassword(pw) {
+  try {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pw + PW_SALT));
+    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  } catch { return "fallback-" + hashString(pw + PW_SALT); }
+}
+const SEED_USERS = [
+  { id: "u-admin", username: "admin", displayName: "Admin", role: "admin", passHash: "6c9ebee13a74cd96bc404a79ee561e4e19cb2069602fa6bc2cf1d20317a6bcd3", createdAt: 0 },
+  { id: "u-demo", username: "stargazer", displayName: "Stargazer", role: "user", passHash: "07ba618296ae395fbc52f95636f2af23782cc4e4492db946a785c3129f909cf6", createdAt: 0 },
+];
+
+const AuthContext = createContext(null);
+const useAuth = () => useContext(AuthContext);
+
+function AuthProvider({ children }) {
+  const [users, setUsers] = useState(() => {
+    const raw = safeStorage.get(USERS_KEY);
+    if (raw) { try { const a = JSON.parse(raw); if (Array.isArray(a) && a.length) return a; } catch { /* */ } }
+    return SEED_USERS;
+  });
+  const [sessionId, setSessionId] = useState(() => safeStorage.get(SESSION_KEY) || null);
+  const [viewAs, setViewAs] = useState(null); // admin impersonation (data scope only)
+
+  useEffect(() => { safeStorage.set(USERS_KEY, JSON.stringify(users)); }, [users]);
+  useEffect(() => { safeStorage.set(SESSION_KEY, sessionId || ""); }, [sessionId]);
+
+  const currentUser = users.find((u) => u.id === sessionId) || null;
+  const isAdmin = currentUser?.role === "admin";
+  const effectiveUserId = (isAdmin && viewAs) ? viewAs : sessionId;
+  const viewingUser = viewAs ? users.find((u) => u.id === viewAs) : null;
+
+  const value = {
+    users, currentUser, isAdmin, effectiveUserId, viewingUser,
+    async login(username, password) {
+      const u = users.find((x) => x.username.toLowerCase() === username.trim().toLowerCase());
+      if (!u) return { error: "No account with that username." };
+      const h = await hashPassword(password);
+      if (h !== u.passHash) return { error: "Incorrect password." };
+      setSessionId(u.id); setViewAs(null); return { ok: true };
+    },
+    async signup({ displayName, username, password }) {
+      const uname = username.trim();
+      if (!uname || !displayName.trim() || !password) return { error: "All fields are required." };
+      if (password.length < 4) return { error: "Password must be at least 4 characters." };
+      if (users.some((x) => x.username.toLowerCase() === uname.toLowerCase())) return { error: "That username is taken." };
+      const passHash = await hashPassword(password);
+      const u = { id: "u-" + Date.now(), username: uname, displayName: displayName.trim(), role: "user", passHash, createdAt: Date.now() };
+      setUsers((prev) => [...prev, u]); setSessionId(u.id); setViewAs(null); return { ok: true };
+    },
+    logout() { setSessionId(null); setViewAs(null); },
+    impersonate(id) { if (isAdmin) setViewAs(id); },
+    stopImpersonating() { setViewAs(null); },
+    setRole(id, role) {
+      setUsers((prev) => {
+        if (role !== "admin" && prev.filter((u) => u.role === "admin").length <= 1 && prev.find((u) => u.id === id)?.role === "admin") return prev;
+        return prev.map((u) => (u.id === id ? { ...u, role } : u));
+      });
+    },
+    deleteUser(id) {
+      if (id === sessionId) return;
+      const target = users.find((u) => u.id === id);
+      if (target?.role === "admin" && users.filter((u) => u.role === "admin").length <= 1) return;
+      setUsers((prev) => prev.filter((u) => u.id !== id));
+      if (viewAs === id) setViewAs(null);
+      try { safeStorage.set(`astrarium.u.${id}.profiles`, ""); safeStorage.set(`astrarium.u.${id}.coven`, ""); } catch { /* */ }
+    },
+    countCharts(id) {
+      const raw = safeStorage.get(`astrarium.u.${id}.profiles`);
+      try { const a = raw ? JSON.parse(raw) : []; return Array.isArray(a) ? a.length : 0; } catch { return 0; }
+    },
+  };
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
 const AstroContext = createContext(null);
 const useAstro = () => useContext(AstroContext);
-const COVEN_KEY = "astrarium.coven.v1";
 
-function AstroProvider({ children }) {
+function AstroProvider({ userId, children }) {
+  const PKEY = `astrarium.u.${userId}.profiles`;
+  const CKEY = `astrarium.u.${userId}.coven`;
   const seed = [
-    { id: "seed-luna", name: "Luna", birthDate: "1996-07-14", birthTime: "03:20", birthLocation: "Lisbon, PT" },
-    { id: "seed-orion", name: "Orion", birthDate: "1992-11-02", birthTime: "21:45", birthLocation: "Reykjavík, IS" },
+    { id: `${userId}__luna`, name: "Luna", birthDate: "1996-07-14", birthTime: "03:20", birthLocation: "Lisbon, PT" },
+    { id: `${userId}__orion`, name: "Orion", birthDate: "1992-11-02", birthTime: "21:45", birthLocation: "Reykjavík, IS" },
   ];
   const [profiles, setProfiles] = useState(() => {
-    const raw = safeStorage.get(STORAGE_KEY);
+    const raw = safeStorage.get(PKEY);
     if (raw) { try { const p = JSON.parse(raw); if (Array.isArray(p) && p.length) return p; } catch { /* ignore */ } }
     return seed;
   });
   const [activeId, setActiveId] = useState(() => profiles[0]?.id);
   const [pinned, setPinned] = useState(() => {
-    const raw = safeStorage.get(COVEN_KEY);
+    const raw = safeStorage.get(CKEY);
     if (raw) { try { const a = JSON.parse(raw); if (Array.isArray(a)) return a; } catch { /* ignore */ } }
     return [];
   });
   const [loading, setLoading] = useState(false);
 
-  // Persist on every change to profiles / coven
-  useEffect(() => { safeStorage.set(STORAGE_KEY, JSON.stringify(profiles)); }, [profiles]);
-  useEffect(() => { safeStorage.set(COVEN_KEY, JSON.stringify(pinned)); }, [pinned]);
+  useEffect(() => { safeStorage.set(PKEY, JSON.stringify(profiles)); }, [profiles, PKEY]);
+  useEffect(() => { safeStorage.set(CKEY, JSON.stringify(pinned)); }, [pinned, CKEY]);
 
   const enrich = (p) => p && ({ ...p, sun: sunSignFromDate(p.birthDate), moon: mockMoonSign(p), rising: mockRisingSign(p) });
 
   const selectProfile = (id) => {
     if (id === activeId) return;
     setLoading(true);
-    setTimeout(() => { setActiveId(id); setLoading(false); }, 650); // mystical transition
+    setTimeout(() => { setActiveId(id); setLoading(false); }, 650);
   };
 
   const value = {
     profiles: profiles.map(enrich),
-    rawProfiles: profiles,
     activeProfile: enrich(profiles.find((p) => p.id === activeId) || profiles[0]),
     activeId, setActiveId, selectProfile, loading,
     pinned,
     togglePin(id) { setPinned((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])); },
     addProfile(p) {
       const id = "p-" + Date.now();
-      setProfiles((prev) => { const next = [...prev, { ...p, id }]; safeStorage.set(STORAGE_KEY, JSON.stringify(next)); return next; });
+      setProfiles((prev) => { const next = [...prev, { ...p, id }]; safeStorage.set(PKEY, JSON.stringify(next)); return next; });
       setActiveId(id);
     },
     removeProfile(id) {
       setProfiles((prev) => {
         const next = prev.filter((x) => x.id !== id);
-        safeStorage.set(STORAGE_KEY, JSON.stringify(next));
+        safeStorage.set(PKEY, JSON.stringify(next));
         if (id === activeId && next.length) setActiveId(next[0].id);
         return next;
       });
@@ -1285,9 +1501,452 @@ function TopBar({ onCreate }) {
           <button onClick={onCreate} className="btn-gold focus-ring hidden items-center gap-1.5 px-4 py-2 text-sm sm:flex"><Plus size={16} /> New chart</button>
           <button onClick={onCreate} aria-label="New chart" className="btn-gold focus-ring grid place-items-center sm:hidden" style={{ width: 38, height: 38 }}><Plus size={18} /></button>
           <ProfileSwitcher onCreate={onCreate} />
+          <UserMenu />
         </div>
       </div>
     </header>
+  );
+}
+
+// --- AI Astrologer chat (powered by the Claude API) -----------
+function AstrologerChat() {
+  const { activeProfile: p } = useAstro();
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const scrollRef = useRef(null);
+  useEffect(() => { setMessages([]); }, [p.id]);
+  useEffect(() => { scrollRef.current?.scrollTo({ top: 1e9, behavior: "smooth" }); }, [messages, busy]);
+
+  const chartLine = () => {
+    const s = p.sun ? ZODIAC[p.sun] : null;
+    const phase = moonPhase();
+    const retros = RETROGRADES.filter((r) => r.status === "Retrograde").map((r) => r.planet).join(", ") || "none";
+    return `Name: ${p.name}. Sun: ${s ? s.name + " (" + s.element + ", ruled by " + s.planet + ")" : "unknown"}. ` +
+      `Moon: ${p.moon ? ZODIAC[p.moon].name : "unknown"}. Rising: ${p.rising ? ZODIAC[p.rising].name : "unknown"}. ` +
+      `Life path number: ${lifePath(p.birthDate) ?? "?"}. Today's moon: ${phase.name}. Retrogrades: ${retros}.`;
+  };
+
+  const ask = async (text) => {
+    const q = (text || input).trim();
+    if (!q || busy) return;
+    const next = [...messages, { role: "user", content: q }];
+    setMessages(next); setInput(""); setBusy(true);
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 1000,
+          system: `You are Astraea, a warm, poetic, insightful astrologer speaking with ${p.name}. ` +
+            `Use their chart naturally. Chart — ${chartLine()} ` +
+            `Keep replies under 130 words, mystical yet grounded and kind. Reference their specific placements when relevant. ` +
+            `Never give medical, legal, or financial advice; gently redirect if asked. Astrology is for reflection and wonder.`,
+          messages: next.map((m) => ({ role: m.role, content: m.content })),
+        }),
+      });
+      const data = await res.json();
+      const out = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+      setMessages((m) => [...m, { role: "assistant", content: out || "The stars are quiet — try asking again." }]);
+    } catch {
+      setMessages((m) => [...m, { role: "assistant", content: "I can't reach the cosmos right now. (Astraea runs through Claude inside this app; in a standalone build, route this call through your own backend.)" }]);
+    } finally { setBusy(false); }
+  };
+
+  const suggestions = ["Why have I felt restless lately?", "What should I focus on today?", `Tell me about my Moon in ${p.moon ? ZODIAC[p.moon].name : "—"}.`];
+  return (
+    <section id="astraea" className="panel p-5 sm:p-6 fade-up">
+      <div className="mb-4 flex items-center gap-2">
+        <BrainCircuit size={18} className="gold" />
+        <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Ask Astraea</h2>
+        <span className="ml-auto text-xs muted">your AI astrologer</span>
+      </div>
+      <div ref={scrollRef} className="mb-3 space-y-2.5 overflow-y-auto" style={{ maxHeight: 280, minHeight: messages.length ? 120 : 0 }}>
+        {messages.map((m, i) => (
+          <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+            <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm ${m.role === "user" ? "btn-gold" : "panel-soft lav"}`}
+              style={m.role === "user" ? { color: "#2a1c05" } : {}}>
+              {m.content}
+            </div>
+          </div>
+        ))}
+        {busy && <div className="flex justify-start"><div className="panel-soft rounded-2xl px-3.5 py-2.5 text-sm muted">consulting the stars…</div></div>}
+      </div>
+      {messages.length === 0 && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {suggestions.map((s) => <button key={s} onClick={() => ask(s)} className="chip focus-ring px-3 py-1.5 text-xs">{s}</button>)}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <input className="field tap px-3 py-2.5" placeholder="Ask about your chart, your day, anything…" value={input}
+          onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && ask()} disabled={busy} />
+        <button onClick={() => ask()} disabled={busy || !input.trim()} className="btn-gold focus-ring tap px-4" style={{ opacity: busy || !input.trim() ? 0.5 : 1 }}><Send size={16} /></button>
+      </div>
+    </section>
+  );
+}
+
+// --- Cosmic Weather -------------------------------------------
+function CosmicWeatherWidget() {
+  const { activeProfile: p } = useAstro();
+  const w = cosmicWeather(p.sun, p);
+  return (
+    <section id="weather" className="panel p-5 sm:p-6 fade-up">
+      <div className="mb-4 flex items-center gap-2">
+        <CloudMoon size={18} className="gold" />
+        <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Cosmic weather</h2>
+      </div>
+      <div className="flex items-center gap-4">
+        <span style={{ fontSize: 52 }} aria-hidden="true">{w.icon}</span>
+        <div className="flex-1">
+          <p className="display text-2xl" style={{ fontWeight: 600, color: w.color }}>{w.label}</p>
+          <p className="text-sm muted">{w.note}</p>
+          <div className="mt-2 overflow-hidden rounded-full" style={{ height: 7, background: "rgba(155,140,232,0.14)" }}>
+            <div style={{ width: `${w.score}%`, height: "100%", background: w.color, borderRadius: 999, transition: "width .6s ease" }} />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// --- Mood × Moon insights -------------------------------------
+const GROUP_GLYPH = { New: "🌑", Waxing: "🌒", Full: "🌕", Waning: "🌘" };
+function MoodMoonInsights() {
+  const { activeProfile: p } = useAstro();
+  const [entries, setEntries] = useState([]);
+  const reload = () => setEntries(loadJournal(p.id));
+  useEffect(() => { reload(); }, [p.id]);
+  const insight = useMemo(() => moodMoonInsight(entries), [entries]);
+  return (
+    <section id="moodmoon" className="panel p-5 sm:p-6 fade-up">
+      <div className="mb-4 flex items-center gap-2">
+        <TrendingUp size={18} className="gold" />
+        <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Mood &amp; Moon</h2>
+        <button onClick={reload} className="btn-ghost focus-ring ml-auto px-3 py-1.5 text-xs">Refresh</button>
+      </div>
+      {!insight ? (
+        <p className="text-sm muted">Log at least three journal entries and I'll reveal how your moods track the moon's phases.</p>
+      ) : (
+        <>
+          <p className="mb-3 text-sm lav">Across {entries.length} entries, your dominant mood by lunar phase:</p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {insight.map((s) => (
+              <div key={s.phase} className="panel-soft flex flex-col items-center gap-1 p-3 text-center">
+                <span style={{ fontSize: 24 }} aria-hidden="true">{GROUP_GLYPH[s.phase]}</span>
+                <span className="text-xs uppercase tracking-wider muted">{s.phase}</span>
+                {s.mood ? (
+                  <span className="text-sm"><span style={{ fontSize: 18 }}>{s.mood}</span> {MOODS.find((m) => m.e === s.mood)?.label || ""}</span>
+                ) : <span className="text-xs muted">—</span>}
+                <span className="text-[10px] muted">{s.count} {s.count === 1 ? "day" : "days"}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+// --- Cosmic streak / rituals ----------------------------------
+function StreakTracker() {
+  const { activeProfile: p } = useAstro();
+  const [r, setR] = useState(() => loadRitual(p.id));
+  useEffect(() => { setR(loadRitual(p.id)); }, [p.id]);
+  const streak = computeStreak(r.dates);
+  const toggle = (key) => {
+    const done = { ...r.done, [key]: !r.done[key] };
+    const today = dayKey(0);
+    let dates = r.dates || [];
+    const allDone = RITUALS.every((rt) => done[rt.key]);
+    if (allDone && !dates.includes(today)) dates = [...dates, today];
+    if (!allDone && dates.includes(today)) dates = dates.filter((d) => d !== today);
+    const next = { ...r, day: today, done, dates, longest: Math.max(r.longest || 0, computeStreak(dates)) };
+    setR(next); saveRitual(p.id, next);
+  };
+  const doneCount = RITUALS.filter((rt) => r.done[rt.key]).length;
+  return (
+    <section id="streak" className="panel p-5 sm:p-6 fade-up">
+      <div className="mb-4 flex items-center gap-2">
+        <Flame size={18} className="gold" />
+        <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Daily ritual</h2>
+      </div>
+      <div className="mb-4 flex items-center gap-4">
+        <div className="relative grid place-items-center" style={{ width: 72, height: 72 }}>
+          <Flame size={34} style={{ color: streak > 0 ? "var(--gold-bright)" : "var(--muted)" }} />
+        </div>
+        <div>
+          <p className="display text-3xl gold" style={{ fontWeight: 600 }}>{streak} <span className="text-base lav">day{streak === 1 ? "" : "s"}</span></p>
+          <p className="text-xs muted">current streak · longest {r.longest || 0} · {doneCount}/3 today</p>
+        </div>
+      </div>
+      <div className="space-y-2">
+        {RITUALS.map((rt) => {
+          const on = !!r.done[rt.key];
+          return (
+            <button key={rt.key} onClick={() => toggle(rt.key)} className="focus-ring tap flex w-full items-center gap-3 panel-soft p-3 text-left">
+              <span className="grid place-items-center rounded-full" style={{ width: 30, height: 30, background: on ? "var(--gold)" : "var(--plum)" }}>
+                {on ? <Check size={16} style={{ color: "#2a1c05" }} /> : <rt.icon size={15} className="lav" />}
+              </span>
+              <span className={`flex-1 text-sm ${on ? "muted" : ""}`} style={{ textDecoration: on ? "line-through" : "none" }}>{rt.label}</span>
+            </button>
+          );
+        })}
+      </div>
+      {doneCount === 3 && <p className="mt-3 text-center text-xs gold">✦ Today is aligned — your streak lives on ✦</p>}
+    </section>
+  );
+}
+
+// --- Chinese zodiac -------------------------------------------
+function ChineseZodiacModule() {
+  const { activeProfile: p } = useAstro();
+  const cz = chineseZodiac(p.birthDate);
+  return (
+    <section id="chinese" className="panel p-5 sm:p-6 fade-up">
+      <div className="mb-4 flex items-center gap-2">
+        <Sparkles size={18} className="gold" />
+        <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Eastern sign</h2>
+      </div>
+      {!cz ? <p className="text-sm muted">Add a birth date to reveal your Chinese zodiac.</p> : (
+        <div className="flex items-center gap-4">
+          <span className="grid place-items-center rounded-2xl shrink-0" style={{ width: 64, height: 64, background: "var(--plum)", fontSize: 34 }}>{cz.emoji}</span>
+          <div>
+            <p className="display text-2xl" style={{ fontWeight: 600 }}>{cz.element} {cz.name}</p>
+            <p className="text-sm lav">{cz.trait.charAt(0).toUpperCase() + cz.trait.slice(1)}.</p>
+            {p.sun && <p className="mt-1 text-xs muted">Paired with your {ZODIAC[p.sun].name} Sun: a blend of {ZODIAC[p.sun].element.toLowerCase()} drive and {cz.element.toLowerCase()}-year temperament.</p>}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// --- Crystal & ritual of the day ------------------------------
+function CrystalOfDay() {
+  const { activeProfile: p } = useAstro();
+  if (!p.sun) return null;
+  const z = ZODIAC[p.sun];
+  const c = CRYSTALS[p.sun];
+  const ritual = ELEMENT_RITUAL[z.element];
+  return (
+    <section id="crystal" className="panel p-5 sm:p-6 fade-up">
+      <div className="mb-4 flex items-center gap-2">
+        <Gem size={18} className="gold" />
+        <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Crystal &amp; ritual</h2>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Stat label="Crystal" value={c.stone} />
+        <Stat label="Wear this color" value={c.color} />
+      </div>
+      <div className="mt-2 panel-soft p-3">
+        <p className="text-xs uppercase tracking-wider muted">{z.element} ritual</p>
+        <p className="mt-0.5 text-sm" style={{ color: "var(--starlight)" }}>{ritual}</p>
+      </div>
+    </section>
+  );
+}
+
+// --- Dream decoder --------------------------------------------
+function DreamDecoder() {
+  const { activeProfile: p } = useAstro();
+  const [text, setText] = useState("");
+  const [result, setResult] = useState(null);
+  const [log, setLog] = useState([]);
+  useEffect(() => { setLog(loadList("dreams", p.id)); setText(""); setResult(null); }, [p.id]);
+  const decode = () => setResult(decodeDream(text));
+  const save = () => {
+    if (!result) return;
+    const entry = { id: Date.now(), date: dayKey(0), text: text.trim().slice(0, 200), symbols: result.symbols };
+    const next = [entry, ...log]; setLog(next); saveList("dreams", p.id, next);
+    setText(""); setResult(null);
+  };
+  const remove = (id) => { const next = log.filter((d) => d.id !== id); setLog(next); saveList("dreams", p.id, next); };
+  return (
+    <section id="dreams" className="panel p-5 sm:p-6 fade-up">
+      <div className="mb-4 flex items-center gap-2">
+        <CloudMoon size={18} className="gold" />
+        <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Dream decoder</h2>
+      </div>
+      <textarea className="field px-3 py-2.5" rows={2} placeholder="Describe last night's dream…" value={text}
+        onChange={(e) => setText(e.target.value)} style={{ resize: "vertical" }} />
+      <div className="mt-2 flex justify-end gap-2">
+        {result && <button onClick={save} className="btn-ghost focus-ring tap px-4 py-2 text-sm">Save to log</button>}
+        <button onClick={decode} disabled={!text.trim()} className="btn-gold focus-ring tap px-4 py-2 text-sm" style={{ opacity: text.trim() ? 1 : 0.5 }}>Decode</button>
+      </div>
+      {result && (
+        <div className="mt-3 panel-soft p-4 fade-up">
+          {result.symbols.length ? result.symbols.map((s) => (
+            <p key={s} className="mb-1.5 text-sm lav"><span className="gold capitalize">{s}:</span> {DREAM_SYMBOLS[s]}</p>
+          )) : <p className="text-sm lav">{result.generic}</p>}
+        </div>
+      )}
+      {log.length > 0 && (
+        <div className="mt-4">
+          <p className="mb-2 text-xs uppercase tracking-wider muted">Dream log</p>
+          <div className="space-y-2">
+            {log.slice(0, 4).map((d) => (
+              <div key={d.id} className="panel-soft flex items-start gap-3 p-3">
+                <div className="flex-1">
+                  <p className="text-sm leading-snug">{d.text}</p>
+                  <p className="mt-1 text-xs muted">{d.date}{d.symbols.length ? " · " + d.symbols.join(", ") : ""}</p>
+                </div>
+                <button onClick={() => remove(d.id)} className="focus-ring rounded-full p-1.5 hover:bg-white/5"><Trash2 size={13} className="muted" /></button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// --- Shareable story card -------------------------------------
+function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
+  const words = text.split(" ");
+  let line = "", lines = [];
+  for (const w of words) {
+    const test = line ? line + " " + w : w;
+    if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = w; } else line = test;
+  }
+  if (line) lines.push(line);
+  lines.slice(0, maxLines).forEach((ln, i) => ctx.fillText(ln, x, y + i * lineHeight));
+}
+function StoryCard() {
+  const { activeProfile: p } = useAstro();
+  const [saved, setSaved] = useState(false);
+  if (!p.sun) return null;
+  const h = composeHoroscope(p.sun, "daily", 0, p.name);
+  const aura = auraOfDay(p.sun, h.mood);
+  const card = tarotOfDay(p.id);
+  const snippet = h.body.split(". ").slice(0, 2).join(". ") + ".";
+  const save = () => {
+    try {
+      const W = 1080, H = 1920, cv = document.createElement("canvas");
+      cv.width = W; cv.height = H;
+      const ctx = cv.getContext("2d");
+      ctx.fillStyle = "#0a0a14"; ctx.fillRect(0, 0, W, H);
+      const g = ctx.createRadialGradient(W * 0.5, H * 0.32, 60, W * 0.5, H * 0.4, 900);
+      g.addColorStop(0, aura.from); g.addColorStop(0.5, aura.via); g.addColorStop(1, "#0a0a14");
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = "center"; ctx.fillStyle = "#ece9ff";
+      ctx.font = "600 90px Georgia"; ctx.fillText(ZODIAC[p.sun].glyph, W / 2, 360);
+      ctx.font = "600 70px Georgia"; ctx.fillText(p.name, W / 2, 470);
+      ctx.font = "400 40px Georgia"; ctx.fillStyle = "#d9b06a";
+      ctx.fillText(`${ZODIAC[p.sun].name} · ${new Date().toLocaleDateString()}`, W / 2, 535);
+      ctx.fillStyle = "#cfcbe8"; ctx.font = "400 46px Georgia";
+      wrapText(ctx, snippet, W / 2, 720, 840, 64, 8);
+      ctx.fillStyle = "#f0cf8e"; ctx.font = "600 54px Georgia";
+      ctx.fillText(`${card.glyph}  ${card.name}`, W / 2, 1500);
+      ctx.fillStyle = "#837ea8"; ctx.font = "400 34px Georgia";
+      ctx.fillText("ASTRARIUM", W / 2, 1820);
+      const a = document.createElement("a");
+      a.href = cv.toDataURL("image/png"); a.download = `astrarium-${p.name}-${dayKey(0)}.png`; a.click();
+    } catch { /* download blocked */ }
+    setSaved(true); setTimeout(() => setSaved(false), 1800);
+  };
+  return (
+    <section id="story" className="panel p-5 sm:p-6 fade-up">
+      <div className="mb-4 flex items-center gap-2">
+        <ImageIcon size={18} className="gold" />
+        <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Daily story card</h2>
+      </div>
+      <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
+        <div className="relative flex flex-col items-center justify-between overflow-hidden rounded-2xl p-4 text-center shrink-0"
+          style={{ width: 200, height: 356, background: `radial-gradient(circle at 50% 32%, ${aura.from}, ${aura.via} 45%, #0a0a14 85%)`, border: "1px solid var(--line)" }}>
+          <div>
+            <p className="glyph" style={{ fontSize: 44, color: "#fff" }}>{ZODIAC[p.sun].glyph}</p>
+            <p className="display text-lg" style={{ fontWeight: 600 }}>{p.name}</p>
+            <p className="text-[10px] gold">{ZODIAC[p.sun].name}</p>
+          </div>
+          <p className="text-[11px] leading-snug" style={{ color: "rgba(255,255,255,0.85)" }}>{snippet}</p>
+          <p className="text-[11px] gold">{card.glyph} {card.name}</p>
+          <p className="text-[8px] uppercase tracking-[0.3em] muted">Astrarium</p>
+        </div>
+        <div className="flex-1 text-center sm:text-left">
+          <p className="text-sm lav">A shareable snapshot of {p.name}'s day — sign, reading, card, and today's aura, ready for your story.</p>
+          <button onClick={save} className="btn-gold focus-ring mt-3 inline-flex items-center gap-1.5 px-4 py-2 text-sm">
+            {saved ? <><Check size={14} /> Saved</> : <><ImageIcon size={14} /> Save image</>}
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// --- Birth star map -------------------------------------------
+function StarMap() {
+  const { activeProfile: p } = useAstro();
+  const stars = useMemo(() => {
+    const rng = mulberry(hashString((p.birthDate || "x") + (p.name || "")));
+    return Array.from({ length: 8 }, () => ({ x: 30 + rng() * 240, y: 30 + rng() * 180, r: 1.5 + rng() * 2.5 }));
+  }, [p.birthDate, p.name]);
+  return (
+    <section id="starmap" className="panel p-5 sm:p-6 fade-up">
+      <div className="mb-4 flex items-center gap-2">
+        <Star size={18} className="gold" />
+        <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Your star map</h2>
+      </div>
+      <div className="rounded-2xl p-2" style={{ background: "radial-gradient(circle at 50% 40%, #14122b, #0a0a14)", border: "1px solid var(--line)" }}>
+        <svg width="100%" viewBox="0 0 300 240" style={{ height: "auto", display: "block" }}>
+          <polyline points={stars.map((s) => `${s.x},${s.y}`).join(" ")} fill="none" stroke="rgba(217,176,106,0.4)" strokeWidth="1" />
+          {stars.map((s, i) => (
+            <g key={i}>
+              <circle cx={s.x} cy={s.y} r={s.r + 2.5} fill="rgba(236,233,255,0.12)" />
+              <circle cx={s.x} cy={s.y} r={s.r} fill="#fff" />
+            </g>
+          ))}
+        </svg>
+      </div>
+      <p className="mt-3 text-xs muted">The unique constellation cast at {p.name}'s birth{p.sun ? ` — guided by ${ZODIAC[p.sun].name}` : ""}.</p>
+    </section>
+  );
+}
+
+// --- Ambient cosmic soundscape --------------------------------
+const ELEMENT_CHORD = {
+  Fire: ["C3", "G3", "C4", "E4"], Earth: ["C3", "Eb3", "G3", "Bb3"],
+  Air: ["D3", "A3", "E4", "B4"], Water: ["A2", "E3", "A3", "C4"],
+};
+function AmbientSound() {
+  const { activeProfile: p } = useAstro();
+  const [on, setOn] = useState(false);
+  const nodes = useRef(null);
+  const element = p.sun ? ZODIAC[p.sun].element : "Air";
+  const stop = () => {
+    if (nodes.current) {
+      try { nodes.current.synth.releaseAll(); } catch { /* */ }
+      const old = nodes.current; nodes.current = null;
+      setTimeout(() => { try { old.synth.dispose(); old.reverb.dispose(); } catch { /* */ } }, 1200);
+    }
+  };
+  useEffect(() => () => stop(), []);
+  const toggle = async () => {
+    if (on) { stop(); setOn(false); return; }
+    try {
+      await Tone.start();
+      const reverb = new Tone.Reverb({ decay: 9, wet: 0.6 }).toDestination();
+      const synth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "sine" }, envelope: { attack: 3.5, decay: 1, sustain: 0.9, release: 7 } }).connect(reverb);
+      synth.volume.value = -20;
+      synth.triggerAttack(ELEMENT_CHORD[element] || ELEMENT_CHORD.Air);
+      nodes.current = { synth, reverb };
+      setOn(true);
+    } catch { setOn(false); }
+  };
+  // restart with new chord if element changes while playing
+  useEffect(() => { if (on) { stop(); setTimeout(toggle, 60); } /* eslint-disable-next-line */ }, [element]);
+  return (
+    <section className="panel flex items-center justify-between gap-3 p-5 fade-up">
+      <div className="flex items-center gap-2">
+        {on ? <Volume2 size={18} className="gold" /> : <VolumeX size={18} className="muted" />}
+        <div>
+          <p className="display text-lg" style={{ fontWeight: 600 }}>Ambient {element.toLowerCase()} drone</p>
+          <p className="text-xs muted">{on ? "playing a tone tuned to your sign" : "a soundscape for your element"}</p>
+        </div>
+      </div>
+      <button onClick={toggle} className={`focus-ring tap rounded-full px-4 py-2 text-sm ${on ? "btn-gold" : "btn-ghost"}`}>{on ? "Stop" : "Play"}</button>
+    </section>
   );
 }
 
@@ -1707,10 +2366,12 @@ function CovenMode() {
 
 // --- Mobile quick-nav -----------------------------------------
 const NAV = [
-  ["horoscope", "Horoscope"], ["chart", "Chart"], ["numerology", "Numerology"],
-  ["tarot", "Card"], ["reading", "Reading"], ["match", "Match"], ["coven", "Circle"],
-  ["oracle", "Oracle"], ["eightball", "8-Ball"], ["todo", "To-do"],
-  ["journal", "Journal"], ["lunar", "Lunar"], ["sky", "Sky"], ["signs", "Signs"],
+  ["astraea", "Astraea"], ["horoscope", "Horoscope"], ["weather", "Weather"], ["chart", "Chart"],
+  ["numerology", "Numbers"], ["chinese", "Eastern"], ["tarot", "Card"], ["reading", "Reading"],
+  ["match", "Match"], ["coven", "Circle"], ["streak", "Ritual"], ["moodmoon", "Mood"],
+  ["dreams", "Dreams"], ["crystal", "Crystal"], ["story", "Story"], ["starmap", "Map"],
+  ["oracle", "Oracle"], ["eightball", "8-Ball"], ["todo", "To-do"], ["journal", "Journal"],
+  ["lunar", "Lunar"], ["sky", "Sky"], ["signs", "Signs"],
 ];
 function QuickNav() {
   const go = (id) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1723,32 +2384,188 @@ function QuickNav() {
   );
 }
 
+// --- Auth screen (login / signup) -----------------------------
+function AuthScreen() {
+  const { login, signup } = useAuth();
+  const [mode, setMode] = useState("login");
+  const [form, setForm] = useState({ displayName: "", username: "", password: "" });
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    setError(""); setBusy(true);
+    const res = mode === "login"
+      ? await login(form.username, form.password)
+      : await signup(form);
+    setBusy(false);
+    if (res?.error) setError(res.error);
+  };
+  return (
+    <main className="relative grid min-h-screen place-items-center px-4">
+      <div className="panel w-full max-w-sm p-7 fade-up">
+        <div className="mb-6 text-center">
+          <span className="mx-auto grid place-items-center rounded-2xl" style={{ width: 52, height: 52, background: "var(--plum)" }}><Sparkles size={26} className="gold" /></span>
+          <h1 className="display mt-3 text-3xl" style={{ fontWeight: 600, letterSpacing: "0.04em" }}>ASTRARIUM</h1>
+          <p className="text-xs uppercase tracking-[0.3em] muted">{mode === "login" ? "welcome back" : "join the cosmos"}</p>
+        </div>
+        <div className="space-y-3">
+          {mode === "signup" && (
+            <Labeled icon={Users} label="Display name">
+              <input className="field px-3 py-2.5" placeholder="What should we call you?" value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} />
+            </Labeled>
+          )}
+          <Labeled icon={Users} label="Username">
+            <input className="field px-3 py-2.5" placeholder="username" autoCapitalize="none" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} onKeyDown={(e) => e.key === "Enter" && submit()} />
+          </Labeled>
+          <Labeled icon={Settings} label="Password">
+            <input type="password" className="field px-3 py-2.5" placeholder="••••••" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} onKeyDown={(e) => e.key === "Enter" && submit()} />
+          </Labeled>
+        </div>
+        {error && <p className="mt-3 text-sm" style={{ color: "#f0a3a3" }}>{error}</p>}
+        <button onClick={submit} disabled={busy} className="btn-gold focus-ring mt-5 w-full py-2.5 text-sm" style={{ opacity: busy ? 0.6 : 1 }}>
+          {busy ? "Aligning…" : mode === "login" ? "Enter" : "Create account"}
+        </button>
+        <p className="mt-4 text-center text-sm muted">
+          {mode === "login" ? "New here? " : "Already have an account? "}
+          <button onClick={() => { setMode(mode === "login" ? "signup" : "login"); setError(""); }} className="focus-ring gold">
+            {mode === "login" ? "Create an account" : "Log in"}
+          </button>
+        </p>
+        <p className="mt-5 rounded-xl p-2.5 text-center text-xs muted" style={{ border: "1px dashed var(--line)" }}>
+          Demo accounts · admin / admin123 · stargazer / cosmos123
+        </p>
+      </div>
+    </main>
+  );
+}
+
+// --- User menu (top bar account) ------------------------------
+function UserMenu() {
+  const { currentUser, isAdmin, logout } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+  if (!currentUser) return null;
+  return (
+    <div className="relative" ref={ref}>
+      <button onClick={() => setOpen((o) => !o)} aria-label="Account" className="focus-ring grid place-items-center rounded-full" style={{ width: 38, height: 38, background: "var(--plum)", border: "1px solid var(--line)" }}>
+        <span className="display gold" style={{ fontSize: 18, fontWeight: 600 }}>{currentUser.displayName.charAt(0).toUpperCase()}</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 z-40 mt-2 w-56 p-2 panel fade-up">
+          <div className="px-2 py-2">
+            <p className="text-sm font-medium">{currentUser.displayName}</p>
+            <p className="text-xs muted">@{currentUser.username} {isAdmin && <span className="gold">· admin</span>}</p>
+          </div>
+          <div className="my-1 border-t hairline" />
+          {isAdmin && (
+            <button onClick={() => { setAdminOpen(true); setOpen(false); }} className="focus-ring tap flex w-full items-center gap-2 rounded-xl px-2 py-2 text-sm hover:bg-white/5">
+              <Settings size={15} className="gold" /> Admin panel
+            </button>
+          )}
+          <button onClick={() => { setOpen(false); logout(); }} className="focus-ring tap flex w-full items-center gap-2 rounded-xl px-2 py-2 text-sm hover:bg-white/5">
+            <X size={15} className="lav" /> Log out
+          </button>
+        </div>
+      )}
+      <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} />
+    </div>
+  );
+}
+
+// --- Admin panel ----------------------------------------------
+function AdminPanel({ open, onClose }) {
+  const { users, currentUser, setRole, deleteUser, impersonate, countCharts } = useAuth();
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[55] grid place-items-center p-4" style={{ background: "rgba(7,6,15,0.72)", backdropFilter: "blur(4px)" }}>
+      <div className="panel w-full max-w-lg p-6 fade-up" style={{ maxHeight: "85vh", overflowY: "auto" }}>
+        <div className="mb-5 flex items-center justify-between">
+          <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Admin · users</h2>
+          <button onClick={onClose} className="focus-ring rounded-full p-1.5 hover:bg-white/5"><X size={18} /></button>
+        </div>
+        <div className="space-y-2">
+          {users.map((u) => {
+            const self = u.id === currentUser.id;
+            return (
+              <div key={u.id} className="panel-soft flex flex-wrap items-center gap-3 p-3">
+                <span className="grid place-items-center rounded-full shrink-0" style={{ width: 34, height: 34, background: "var(--plum)" }}>
+                  <span className="display gold" style={{ fontSize: 16, fontWeight: 600 }}>{u.displayName.charAt(0).toUpperCase()}</span>
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{u.displayName} {self && <span className="text-xs muted">· you</span>}</p>
+                  <p className="text-xs muted">@{u.username} · {u.role} · {countCharts(u.id)} charts</p>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button onClick={() => { impersonate(u.id); onClose(); }} className="btn-ghost focus-ring rounded-full px-3 py-1.5 text-xs" title="View their dashboard">View</button>
+                  <button onClick={() => setRole(u.id, u.role === "admin" ? "user" : "admin")} className="btn-ghost focus-ring rounded-full px-3 py-1.5 text-xs">
+                    {u.role === "admin" ? "Demote" : "Promote"}
+                  </button>
+                  <button onClick={() => deleteUser(u.id)} disabled={self} className="focus-ring rounded-full p-2 hover:bg-white/5" style={{ opacity: self ? 0.3 : 1, cursor: self ? "not-allowed" : "pointer" }} title="Delete user">
+                    <Trash2 size={14} className="muted" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <p className="mt-4 text-xs muted">"View" opens that user's dashboard as admin. The last admin can't be demoted or deleted.</p>
+      </div>
+    </div>
+  );
+}
+
+// --- Impersonation banner -------------------------------------
+function ImpersonationBanner() {
+  const { viewingUser, stopImpersonating } = useAuth();
+  if (!viewingUser) return null;
+  return (
+    <div className="mx-auto mb-3 mt-3 flex max-w-6xl items-center justify-between gap-3 rounded-xl px-4 py-2.5" style={{ background: "rgba(217,176,106,0.12)", border: "1px solid rgba(217,176,106,0.4)" }}>
+      <p className="text-sm gold">Viewing {viewingUser.displayName}'s dashboard as admin</p>
+      <button onClick={stopImpersonating} className="btn-ghost focus-ring rounded-full px-3 py-1.5 text-xs">Exit</button>
+    </div>
+  );
+}
+
 // --- App Shell -------------------------------------------------
 function Dashboard() {
   const [modal, setModal] = useState(false);
   return (
-    <div className="astra-root">
-      <GlobalStyles />
-      <Starfield />
+    <>
       <LoadingOverlay />
       <TopBar onCreate={() => setModal(true)} />
+      <ImpersonationBanner />
       <main className="relative mx-auto max-w-6xl px-4 pb-16 sm:px-6">
         <WelcomeHeader />
         <div className="mt-4"><QuickNav /></div>
         <RetrogradeRadar />
         <div className="mt-2 grid grid-cols-1 gap-6 lg:grid-cols-3">
           <div className="space-y-6 lg:col-span-2">
+            <AstrologerChat />
             <HoroscopeModule />
             <BirthChartRings />
             <CompatibilityMatrix />
             <TarotReading />
             <CovenMode />
+            <DreamDecoder />
+            <MoodMoonInsights />
+            <StoryCard />
             <ZodiacDeepDive />
           </div>
           <div className="space-y-6">
+            <AmbientSound />
+            <CosmicWeatherWidget />
             <AuraOrb />
             <TransitsWidget />
+            <StreakTracker />
             <NumerologyModule />
+            <ChineseZodiacModule />
+            <CrystalOfDay />
+            <StarMap />
             <TarotCard />
             <EightBall />
             <AskTheStars />
@@ -1759,18 +2576,32 @@ function Dashboard() {
           </div>
         </div>
         <footer className="mt-10 text-center text-xs muted">
-          For wonder, not divination · Moon, Rising &amp; numerology are playful estimates
+          For wonder, not divination · Astraea, Moon, Rising &amp; numerology are playful guides
         </footer>
       </main>
       <CreateProfileModal open={modal} onClose={() => setModal(false)} />
-    </div>
+    </>
+  );
+}
+
+function AppInner() {
+  const { currentUser, effectiveUserId } = useAuth();
+  if (!currentUser) return <AuthScreen />;
+  return (
+    <AstroProvider key={effectiveUserId} userId={effectiveUserId}>
+      <Dashboard />
+    </AstroProvider>
   );
 }
 
 export default function App() {
   return (
-    <AstroProvider>
-      <Dashboard />
-    </AstroProvider>
+    <AuthProvider>
+      <div className="astra-root">
+        <GlobalStyles />
+        <Starfield />
+        <AppInner />
+      </div>
+    </AuthProvider>
   );
 }
