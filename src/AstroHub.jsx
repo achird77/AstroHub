@@ -5,7 +5,7 @@ import {
   Heart, Compass, Calendar, Clock, MapPin, Trash2, Orbit, Flame,
   Mountain, Wind, Droplets, Check, ArrowLeftRight, Wand2, NotebookPen,
   Send, Copy, CalendarDays, TrendingUp, MessageCircle, Gem, CloudMoon,
-  Volume2, VolumeX, Image as ImageIcon, Sparkle, BrainCircuit,
+  Volume2, VolumeX, Image as ImageIcon, Sparkle,
 } from "lucide-react";
 
 /* ============================================================
@@ -659,9 +659,89 @@ const safeStorage = {
   set(key, val) {
     memStore[key] = val;
     try { window.localStorage.setItem(key, val); } catch { /* sandboxed — memory only */ }
+    if (CLOUD && DATA_KEY_RE.test(key)) scheduleCloudPush();
   },
 };
 const STORAGE_KEY = "astrarium.profiles.v1";
+
+/* ============================================================
+   CLOUD BACKEND (Supabase) — optional, for cross-device login
+   ------------------------------------------------------------
+   1. Create a free project at supabase.com
+   2. In Authentication → Providers → Email, turn OFF "Confirm email"
+      (so new sign-ups can log in immediately).
+   3. In the SQL editor, run:
+
+   create table public.profiles (
+     id uuid primary key references auth.users on delete cascade,
+     email text, display_name text, role text not null default 'user',
+     birth_date date, birth_time text, birth_location text,
+     created_at timestamptz default now());
+   alter table public.profiles enable row level security;
+   create or replace function public.is_admin() returns boolean
+     language sql security definer set search_path=public stable as $$
+     select exists(select 1 from public.profiles where id=auth.uid() and role='admin') $$;
+   create policy p_sel on public.profiles for select using (id=auth.uid() or public.is_admin());
+   create policy p_ins on public.profiles for insert with check (id=auth.uid());
+   create policy p_upd on public.profiles for update using (id=auth.uid() or public.is_admin());
+   create policy p_del on public.profiles for delete using (public.is_admin());
+
+   create table public.app_data (
+     user_id uuid primary key references auth.users on delete cascade,
+     data jsonb not null default '{}'::jsonb, updated_at timestamptz default now());
+   alter table public.app_data enable row level security;
+   create policy d_sel on public.app_data for select using (user_id=auth.uid() or public.is_admin());
+   create policy d_ins on public.app_data for insert with check (user_id=auth.uid());
+   create policy d_upd on public.app_data for update using (user_id=auth.uid());
+
+   4. Sign up once, then make yourself admin:
+      update public.profiles set role='admin' where email='you@example.com';
+   5. Paste your project URL + anon key below.
+   ============================================================ */
+const SUPABASE_URL = "";       // e.g. "https://xxxxx.supabase.co"
+const SUPABASE_ANON_KEY = "";  // your project's anon public key
+const CLOUD = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
+
+let _sbPromise = null;
+async function getSB() {
+  if (!CLOUD) return null;
+  if (_sbPromise) return _sbPromise;
+  _sbPromise = (async () => {
+    if (!window.supabase) {
+      await new Promise((res, rej) => {
+        const s = document.createElement("script");
+        s.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";
+        s.onload = res; s.onerror = () => rej(new Error("Could not load Supabase"));
+        document.head.appendChild(s);
+      });
+    }
+    return window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true } });
+  })();
+  return _sbPromise;
+}
+
+// Per-user app data lives under these key prefixes and is synced as one JSON blob.
+const DATA_KEY_RE = /^astrarium\.(u\.|journal\.|todos\.|dreams\.|ritual\.)/;
+let _pushTimer = null, _pushFn = null, _cloudReadOnly = false;
+function registerCloudPush(fn) { _pushFn = fn; }
+function setCloudReadOnly(v) { _cloudReadOnly = v; }
+function scheduleCloudPush() {
+  if (!CLOUD || !_pushFn || _cloudReadOnly) return;
+  clearTimeout(_pushTimer);
+  _pushTimer = setTimeout(() => { try { _pushFn(); } catch { /* */ } }, 900);
+}
+function collectCloudData() {
+  const out = {};
+  for (const k in memStore) if (DATA_KEY_RE.test(k)) out[k] = memStore[k];
+  return out;
+}
+function hydrateCloudData(blob) {
+  for (const k in memStore) if (DATA_KEY_RE.test(k)) delete memStore[k];
+  try { for (const k in window.localStorage) { if (DATA_KEY_RE.test(k)) window.localStorage.removeItem(k); } } catch { /* */ }
+  if (blob && typeof blob === "object") {
+    for (const k in blob) { memStore[k] = blob[k]; try { window.localStorage.setItem(k, blob[k]); } catch { /* */ } }
+  }
+}
 
 // --- Context ---------------------------------------------------
 // --- Authentication (prototype, client-side) -------------------
@@ -685,7 +765,7 @@ const SEED_USERS = [
 const AuthContext = createContext(null);
 const useAuth = () => useContext(AuthContext);
 
-function AuthProvider({ children }) {
+function LocalAuthProvider({ children }) {
   const [users, setUsers] = useState(() => {
     const raw = safeStorage.get(USERS_KEY);
     if (raw) { try { const a = JSON.parse(raw); if (Array.isArray(a) && a.length) return a; } catch { /* */ } }
@@ -705,6 +785,7 @@ function AuthProvider({ children }) {
   const effectiveUser = viewingUser || currentUser;
 
   const value = {
+    cloud: false, booting: false,
     users, currentUser, isAdmin, effectiveUserId, viewingUser, effectiveUser, entering,
     endEntering() { setEntering(false); },
     async login(username, password) {
@@ -753,6 +834,101 @@ function AuthProvider({ children }) {
   };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
+
+// --- Cloud auth provider (Supabase) ----------------------------
+function CloudAuthProvider({ children }) {
+  const [currentUser, setCurrentUser] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [booting, setBooting] = useState(true);
+  const [entering, setEntering] = useState(false);
+  const [viewAs, setViewAs] = useState(null);
+
+  const toUser = (r) => r && ({ id: r.id, email: r.email, username: r.email, displayName: r.display_name, role: r.role, birthDate: r.birth_date, birthTime: r.birth_time, birthLocation: r.birth_location, createdAt: r.created_at });
+  const loadData = async (sb, uid) => {
+    try { const { data } = await sb.from("app_data").select("data").eq("user_id", uid).maybeSingle(); hydrateCloudData(data?.data || {}); }
+    catch { hydrateCloudData({}); }
+  };
+  const pushData = async () => {
+    try { const sb = await getSB(); const { data } = await sb.auth.getUser(); const uid = data?.user?.id; if (!uid) return;
+      await sb.from("app_data").upsert({ user_id: uid, data: collectCloudData(), updated_at: new Date().toISOString() }); } catch { /* */ }
+  };
+  const refreshUsers = async (sb, admin) => {
+    if (!admin) { setUsers([]); return; }
+    try { const { data } = await sb.from("profiles").select("*").order("created_at"); setUsers((data || []).map(toUser)); } catch { /* */ }
+  };
+  useEffect(() => { registerCloudPush(pushData); }, []);
+  useEffect(() => { setCloudReadOnly(!!viewAs); }, [viewAs]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const sb = await getSB();
+        const { data: { session } } = await sb.auth.getSession();
+        if (session?.user) {
+          const { data: prof } = await sb.from("profiles").select("*").eq("id", session.user.id).maybeSingle();
+          const u = toUser(prof);
+          if (u) { await loadData(sb, u.id); setCurrentUser(u); refreshUsers(sb, u.role === "admin"); }
+        }
+      } catch { /* */ }
+      setBooting(false);
+    })();
+  }, []);
+
+  const isAdmin = currentUser?.role === "admin";
+  const effectiveUserId = (isAdmin && viewAs) ? viewAs : currentUser?.id;
+  const viewingUser = viewAs ? users.find((u) => u.id === viewAs) : null;
+  const effectiveUser = viewingUser || currentUser;
+
+  const value = {
+    cloud: true, booting, users, currentUser, isAdmin, effectiveUserId, viewingUser, effectiveUser, entering,
+    endEntering() { setEntering(false); },
+    async login(email, password) {
+      try {
+        const sb = await getSB();
+        const { data, error } = await sb.auth.signInWithPassword({ email: (email || "").trim(), password });
+        if (error) return { error: error.message };
+        const { data: prof } = await sb.from("profiles").select("*").eq("id", data.user.id).maybeSingle();
+        const u = toUser(prof);
+        if (!u) return { error: "Signed in, but no profile exists yet. An admin may need to restore it." };
+        await loadData(sb, u.id);
+        setCurrentUser(u); setViewAs(null); setEntering(true); refreshUsers(sb, u.role === "admin");
+        return { ok: true };
+      } catch (e) { return { error: "Cloud error: " + (e.message || e) }; }
+    },
+    async signup({ displayName, email, password, birthDate, birthTime, birthLocation }) {
+      try {
+        if (!email?.trim() || !displayName?.trim() || !password) return { error: "Name, email and password are required." };
+        if (!birthDate) return { error: "A birth date is needed to cast your chart." };
+        if (password.length < 6) return { error: "Password must be at least 6 characters." };
+        const sb = await getSB();
+        const { data, error } = await sb.auth.signUp({ email: email.trim(), password });
+        if (error) return { error: error.message };
+        if (!data.user) return { error: "Almost there — confirm via the email we sent, then log in. (Or disable email confirmation in Supabase.)" };
+        const row = { id: data.user.id, email: email.trim(), display_name: displayName.trim(), role: "user", birth_date: birthDate, birth_time: birthTime || "", birth_location: birthLocation || "" };
+        const { error: pe } = await sb.from("profiles").insert(row);
+        if (pe) return { error: pe.message };
+        const selfId = `${data.user.id}__self`;
+        hydrateCloudData({ [`astrarium.u.${data.user.id}.profiles`]: JSON.stringify([{ id: selfId, name: displayName.trim(), birthDate, birthTime: birthTime || "", birthLocation: birthLocation || "" }]) });
+        await sb.from("app_data").upsert({ user_id: data.user.id, data: collectCloudData(), updated_at: new Date().toISOString() });
+        const u = toUser({ ...row, created_at: new Date().toISOString() });
+        setCurrentUser(u); setViewAs(null); setEntering(true);
+        return { ok: true };
+      } catch (e) { return { error: "Cloud error: " + (e.message || e) }; }
+    },
+    async logout() { try { const sb = await getSB(); await sb.auth.signOut(); } catch { /* */ } hydrateCloudData({}); setCurrentUser(null); setViewAs(null); setEntering(false); },
+    async impersonate(id) { if (!isAdmin) return; try { const sb = await getSB(); await loadData(sb, id); } catch { /* */ } setViewAs(id); },
+    async stopImpersonating() { if (currentUser) { try { const sb = await getSB(); await loadData(sb, currentUser.id); } catch { /* */ } } setViewAs(null); },
+    async setRole(id, role) { try { const sb = await getSB(); await sb.from("profiles").update({ role }).eq("id", id); refreshUsers(sb, true); } catch { /* */ } },
+    async deleteUser(id) {
+      if (id === currentUser?.id) return;
+      try { const sb = await getSB(); await sb.from("app_data").delete().eq("user_id", id); await sb.from("profiles").delete().eq("id", id); if (viewAs === id) setViewAs(null); refreshUsers(sb, true); } catch { /* */ }
+    },
+    countCharts() { return null; }, // not loaded for other users in cloud mode
+  };
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+const AuthProvider = CLOUD ? CloudAuthProvider : LocalAuthProvider;
 
 const AstroContext = createContext(null);
 const useAstro = () => useContext(AstroContext);
@@ -1133,7 +1309,7 @@ function HoroscopeModule() {
         <p className="mb-3 flex items-center gap-1.5 text-xs uppercase tracking-wider muted"><TrendingUp size={13} className="gold" /> 7-day cosmic forecast</p>
         <div className="flex items-end justify-between gap-1.5" style={{ height: 76 }}>
           {forecast.map((f) => (
-            <button key={f.offset} onClick={() => { setPeriod("daily"); setOffset(f.offset <= 1 ? f.offset : 0); }}
+            <button key={f.offset} onClick={() => { setPeriod("daily"); setOffset(f.offset); }}
               className="focus-ring group flex flex-1 flex-col items-center justify-end gap-1.5" style={{ height: "100%" }} title={`${f.label}: ${f.score}`}>
               <span className="mono text-[10px] muted">{f.score}</span>
               <span className="w-full rounded-t-md transition-all" style={{
@@ -1540,85 +1716,6 @@ function TopBar({ onCreate }) {
         </div>
       </div>
     </header>
-  );
-}
-
-// --- AI Astrologer chat (powered by the Claude API) -----------
-function AstrologerChat() {
-  const { activeProfile: p } = useAstro();
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
-  const scrollRef = useRef(null);
-  useEffect(() => { setMessages([]); }, [p.id]);
-  useEffect(() => { scrollRef.current?.scrollTo({ top: 1e9, behavior: "smooth" }); }, [messages, busy]);
-
-  const chartLine = () => {
-    const s = p.sun ? ZODIAC[p.sun] : null;
-    const phase = moonPhase();
-    const retros = RETROGRADES.filter((r) => r.status === "Retrograde").map((r) => r.planet).join(", ") || "none";
-    return `Name: ${p.name}. Sun: ${s ? s.name + " (" + s.element + ", ruled by " + s.planet + ")" : "unknown"}. ` +
-      `Moon: ${p.moon ? ZODIAC[p.moon].name : "unknown"}. Rising: ${p.rising ? ZODIAC[p.rising].name : "unknown"}. ` +
-      `Life path number: ${lifePath(p.birthDate) ?? "?"}. Today's moon: ${phase.name}. Retrogrades: ${retros}.`;
-  };
-
-  const ask = async (text) => {
-    const q = (text || input).trim();
-    if (!q || busy) return;
-    const next = [...messages, { role: "user", content: q }];
-    setMessages(next); setInput(""); setBusy(true);
-    try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-6",
-          max_tokens: 1000,
-          system: `You are Astraea, a warm, poetic, insightful astrologer speaking with ${p.name}. ` +
-            `Use their chart naturally. Chart — ${chartLine()} ` +
-            `Keep replies under 130 words, mystical yet grounded and kind. Reference their specific placements when relevant. ` +
-            `Never give medical, legal, or financial advice; gently redirect if asked. Astrology is for reflection and wonder.`,
-          messages: next.map((m) => ({ role: m.role, content: m.content })),
-        }),
-      });
-      const data = await res.json();
-      const out = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
-      setMessages((m) => [...m, { role: "assistant", content: out || "The stars are quiet — try asking again." }]);
-    } catch {
-      setMessages((m) => [...m, { role: "assistant", content: "I can't reach the cosmos right now. (Astraea runs through Claude inside this app; in a standalone build, route this call through your own backend.)" }]);
-    } finally { setBusy(false); }
-  };
-
-  const suggestions = ["Why have I felt restless lately?", "What should I focus on today?", `Tell me about my Moon in ${p.moon ? ZODIAC[p.moon].name : "—"}.`];
-  return (
-    <section id="astraea" className="panel p-5 sm:p-6 fade-up">
-      <div className="mb-4 flex items-center gap-2">
-        <BrainCircuit size={18} className="gold" />
-        <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Ask Astraea</h2>
-        <span className="ml-auto text-xs muted">your AI astrologer</span>
-      </div>
-      <div ref={scrollRef} className="mb-3 space-y-2.5 overflow-y-auto" style={{ maxHeight: 280, minHeight: messages.length ? 120 : 0 }}>
-        {messages.map((m, i) => (
-          <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-            <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm ${m.role === "user" ? "btn-gold" : "panel-soft lav"}`}
-              style={m.role === "user" ? { color: "#2a1c05" } : {}}>
-              {m.content}
-            </div>
-          </div>
-        ))}
-        {busy && <div className="flex justify-start"><div className="panel-soft rounded-2xl px-3.5 py-2.5 text-sm muted">consulting the stars…</div></div>}
-      </div>
-      {messages.length === 0 && (
-        <div className="mb-3 flex flex-wrap gap-2">
-          {suggestions.map((s) => <button key={s} onClick={() => ask(s)} className="chip focus-ring px-3 py-1.5 text-xs">{s}</button>)}
-        </div>
-      )}
-      <div className="flex gap-2">
-        <input className="field tap px-3 py-2.5" placeholder="Ask about your chart, your day, anything…" value={input}
-          onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && ask()} disabled={busy} />
-        <button onClick={() => ask()} disabled={busy || !input.trim()} className="btn-gold focus-ring tap px-4" style={{ opacity: busy || !input.trim() ? 0.5 : 1 }}><Send size={16} /></button>
-      </div>
-    </section>
   );
 }
 
@@ -2443,7 +2540,7 @@ function CovenMode() {
 
 // --- Mobile quick-nav -----------------------------------------
 const NAV = [
-  ["astraea", "Astraea"], ["horoscope", "Horoscope"], ["weather", "Weather"], ["chart", "Chart"],
+  ["horoscope", "Horoscope"], ["weather", "Weather"], ["chart", "Chart"],
   ["numerology", "Numbers"], ["chinese", "Eastern"], ["tarot", "Card"], ["reading", "Reading"],
   ["match", "Match"], ["coven", "Circle"], ["streak", "Ritual"], ["moodmoon", "Mood"],
   ["dreams", "Dreams"], ["crystal", "Crystal"], ["story", "Story"], ["starmap", "Map"],
@@ -2463,17 +2560,18 @@ function QuickNav() {
 
 // --- Auth screen (login / signup) -----------------------------
 function AuthScreen() {
-  const { login, signup } = useAuth();
+  const { login, signup, cloud } = useAuth();
   const [mode, setMode] = useState("login");
-  const [form, setForm] = useState({ displayName: "", username: "", password: "", birthDate: "", birthTime: "", birthLocation: "" });
+  const [form, setForm] = useState({ displayName: "", username: "", email: "", password: "", birthDate: "", birthTime: "", birthLocation: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const previewSign = mode === "signup" && form.birthDate ? sunSignFromDate(form.birthDate) : null;
   const submit = async () => {
     setError(""); setBusy(true);
+    const identifier = cloud ? form.email : form.username;
     const res = mode === "login"
-      ? await login(form.username, form.password)
-      : await signup(form);
+      ? await login(identifier, form.password)
+      : await signup(cloud ? form : { ...form, email: form.username });
     setBusy(false);
     if (res?.error) setError(res.error);
   };
@@ -2491,9 +2589,15 @@ function AuthScreen() {
               <input className="field px-3 py-2.5" placeholder="What should we call you?" value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} />
             </Labeled>
           )}
-          <Labeled icon={Users} label="Username">
-            <input className="field px-3 py-2.5" placeholder="username" autoCapitalize="none" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} onKeyDown={(e) => e.key === "Enter" && submit()} />
-          </Labeled>
+          {cloud ? (
+            <Labeled icon={Users} label="Email">
+              <input type="email" className="field px-3 py-2.5" placeholder="you@example.com" autoCapitalize="none" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} onKeyDown={(e) => e.key === "Enter" && submit()} />
+            </Labeled>
+          ) : (
+            <Labeled icon={Users} label="Username">
+              <input className="field px-3 py-2.5" placeholder="username" autoCapitalize="none" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} onKeyDown={(e) => e.key === "Enter" && submit()} />
+            </Labeled>
+          )}
           <Labeled icon={Settings} label="Password">
             <input type="password" className="field px-3 py-2.5" placeholder="••••••" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} onKeyDown={(e) => e.key === "Enter" && submit()} />
           </Labeled>
@@ -2530,7 +2634,7 @@ function AuthScreen() {
           </button>
         </p>
         <p className="mt-5 rounded-xl p-2.5 text-center text-xs muted" style={{ border: "1px dashed var(--line)" }}>
-          Demo accounts · admin / admin123 · stargazer / cosmos123
+          {cloud ? "Cloud sync on · your account works across devices" : "Demo accounts · admin / admin123 · stargazer / cosmos123"}
         </p>
       </div>
     </main>
@@ -2597,7 +2701,7 @@ function AdminPanel({ open, onClose }) {
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{u.displayName} {self && <span className="text-xs muted">· you</span>}</p>
-                  <p className="text-xs muted">@{u.username} · {u.role} · {countCharts(u.id)} charts</p>
+                  <p className="text-xs muted">@{u.username} · {u.role}{countCharts(u.id) != null ? ` · ${countCharts(u.id)} charts` : ""}</p>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <button onClick={() => { impersonate(u.id); onClose(); }} className="btn-ghost focus-ring rounded-full px-3 py-1.5 text-xs" title="View their dashboard">View</button>
@@ -2646,7 +2750,6 @@ function Dashboard() {
         <RetrogradeRadar />
         <div className="mt-2 grid grid-cols-1 gap-6 lg:grid-cols-3">
           <div className="space-y-6 lg:col-span-2">
-            <AstrologerChat />
             <HoroscopeModule />
             <BirthChartRings />
             <CompatibilityMatrix />
@@ -2677,7 +2780,7 @@ function Dashboard() {
           </div>
         </div>
         <footer className="mt-10 text-center text-xs muted">
-          For wonder, not divination · Astraea, Moon, Rising &amp; numerology are playful guides
+          For wonder, not divination · Moon, Rising &amp; numerology are playful guides
         </footer>
       </main>
       <ProfileModal
@@ -2691,10 +2794,23 @@ function Dashboard() {
 }
 
 function AppInner() {
-  const { currentUser, effectiveUserId, effectiveUser, entering, endEntering } = useAuth();
+  const { currentUser, effectiveUserId, effectiveUser, entering, endEntering, booting } = useAuth();
   useEffect(() => {
     if (entering) { const t = setTimeout(endEntering, 1800); return () => clearTimeout(t); }
   }, [entering, endEntering]);
+  if (booting) {
+    return (
+      <main className="grid min-h-screen place-items-center">
+        <div className="text-center">
+          <svg width="90" height="90" viewBox="0 0 90 90" className="overlay-spin mx-auto">
+            <circle cx="45" cy="45" r="38" fill="none" stroke="rgba(217,176,106,0.4)" strokeWidth="1" strokeDasharray="3 7" />
+            <text x="45" y="45" textAnchor="middle" dominantBaseline="central" style={{ fontFamily: "Cormorant Garamond, serif", fontSize: 26, fill: "var(--gold-bright)" }}>✦</text>
+          </svg>
+          <p className="display mt-3 text-lg gold">Reaching the stars…</p>
+        </div>
+      </main>
+    );
+  }
   if (!currentUser) return <AuthScreen />;
   return (
     <AstroProvider key={effectiveUserId} userId={effectiveUserId} seedUser={effectiveUser}>
