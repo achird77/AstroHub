@@ -124,6 +124,20 @@ function GlobalStyles() {
       .flip.is-flipped .flip-inner { transform: rotateY(180deg); }
       .flip-face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 18px; }
       .flip-back { transform: rotateY(180deg); }
+
+      @keyframes shake { 0%,100% { transform: translate(0,0) rotate(0); } 20% { transform: translate(-6px,3px) rotate(-4deg); } 40% { transform: translate(6px,-3px) rotate(4deg); } 60% { transform: translate(-5px,2px) rotate(-3deg); } 80% { transform: translate(5px,-2px) rotate(3deg); } }
+      .shaking { animation: shake .55s ease; }
+      @keyframes orb-float { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-8px) scale(1.02); } }
+      .orb-float { animation: orb-float 6s ease-in-out infinite; }
+      @keyframes glow-pulse { 0%,100% { box-shadow: 0 0 0 1px rgba(224,90,90,.5), 0 0 24px -4px rgba(224,90,90,.45); } 50% { box-shadow: 0 0 0 1px rgba(224,90,90,.8), 0 0 38px 0 rgba(224,90,90,.6); } }
+      .retro-glow { animation: glow-pulse 3s ease-in-out infinite; border-color: rgba(224,90,90,.5) !important; }
+      @keyframes overlay-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+      .overlay-spin { animation: overlay-spin 2.4s linear infinite; transform-origin: center; }
+      @keyframes shoot { 0% { transform: translate(0,0); opacity: 0; } 8% { opacity: 1; } 100% { transform: translate(-260px,160px); opacity: 0; } }
+      .shoot { animation: shoot 3.2s linear infinite; }
+      @media (prefers-reduced-motion: reduce) {
+        .shaking, .orb-float, .retro-glow, .overlay-spin, .shoot { animation: none !important; }
+      }
     `}</style>
   );
 }
@@ -287,13 +301,8 @@ function compatibility(a, b) {
 const PHASES = ["New Moon", "Waxing Crescent", "First Quarter", "Waxing Gibbous", "Full Moon", "Waning Gibbous", "Last Quarter", "Waning Crescent"];
 const PHASE_GLYPH = ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"];
 function moonPhase() {
-  const ref = Date.UTC(2000, 0, 6, 18, 14); // known new moon
-  const synodic = 29.53058867;
-  const days = (Date.now() - ref) / 86400000;
-  const age = ((days % synodic) + synodic) % synodic;
-  const idx = Math.floor((age / synodic) * 8 + 0.5) % 8;
-  const illum = Math.round((1 - Math.cos((age / synodic) * 2 * Math.PI)) / 2 * 100);
-  return { name: PHASES[idx], glyph: PHASE_GLYPH[idx], illum, age: age.toFixed(1) };
+  const m = moonData();
+  return { name: m.name, glyph: m.glyph, illum: m.illum, age: m.age };
 }
 const RETROGRADES = [
   { planet: "Mercury", status: "Direct", note: "Communication flows clear — sign the contract." },
@@ -376,6 +385,128 @@ function loadJournal(pid) {
 }
 function saveJournal(pid, entries) { safeStorage.set(journalKey(pid), JSON.stringify(entries)); }
 
+// --- Generic per-profile list storage (todos) ------------------
+function listKey(kind, pid) { return `astrarium.${kind}.${pid}`; }
+function loadList(kind, pid) {
+  const raw = safeStorage.get(listKey(kind, pid));
+  if (!raw) return [];
+  try { const a = JSON.parse(raw); return Array.isArray(a) ? a : []; } catch { return []; }
+}
+function saveList(kind, pid, items) { safeStorage.set(listKey(kind, pid), JSON.stringify(items)); }
+
+// --- Numerology ------------------------------------------------
+const NUM_MEANING = {
+  1: "The Leader — independent, pioneering, bold.",
+  2: "The Diplomat — sensitive, cooperative, intuitive.",
+  3: "The Creative — expressive, joyful, magnetic.",
+  4: "The Builder — grounded, disciplined, steady.",
+  5: "The Adventurer — free, curious, ever-changing.",
+  6: "The Nurturer — caring, responsible, harmonious.",
+  7: "The Seeker — analytical, spiritual, introspective.",
+  8: "The Powerhouse — ambitious, capable, abundant.",
+  9: "The Humanitarian — compassionate, wise, giving.",
+  11: "Master 11 — The Visionary, an illuminated intuitive.",
+  22: "Master 22 — The Master Builder of grand dreams.",
+  33: "Master 33 — The Master Teacher of love and healing.",
+};
+const MASTERS = new Set([11, 22, 33]);
+function reduceNumber(n) { while (n > 9 && !MASTERS.has(n)) n = String(n).split("").reduce((a, c) => a + +c, 0); return n; }
+function digitsSum(s) { return String(s).split("").reduce((a, c) => a + (/\d/.test(c) ? +c : 0), 0); }
+const LETTER_VAL = {};
+"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").forEach((ch, i) => { LETTER_VAL[ch] = (i % 9) + 1; });
+function lifePath(birthDate) { if (!birthDate) return null; return reduceNumber(digitsSum(birthDate.replace(/-/g, ""))); }
+function nameNumber(name) { if (!name) return null; const s = [...name.toUpperCase()].reduce((a, c) => a + (LETTER_VAL[c] || 0), 0); return s ? reduceNumber(s) : null; }
+function personalYear(birthDate) {
+  if (!birthDate) return null;
+  const d = new Date(birthDate + "T00:00:00");
+  return reduceNumber(digitsSum((d.getMonth() + 1) + "" + d.getDate()) + digitsSum("" + new Date().getFullYear()));
+}
+
+// --- Lunar calendar --------------------------------------------
+function moonData(ts = Date.now()) {
+  const ref = Date.UTC(2000, 0, 6, 18, 14);
+  const synodic = 29.53058867;
+  const days = (ts - ref) / 86400000;
+  const age = ((days % synodic) + synodic) % synodic;
+  const idx = Math.floor((age / synodic) * 8 + 0.5) % 8;
+  const illum = Math.round((1 - Math.cos((age / synodic) * 2 * Math.PI)) / 2 * 100);
+  return { idx, name: PHASES[idx], glyph: PHASE_GLYPH[idx], illum, age: age.toFixed(1) };
+}
+function buildMonth(view = new Date()) {
+  const year = view.getFullYear(), month = view.getMonth();
+  const first = new Date(year, month, 1);
+  const startDay = first.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const todayKey = new Date().toDateString();
+  const cells = [];
+  for (let i = 0; i < startDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = new Date(year, month, d, 12, 0);
+    const m = moonData(date.getTime());
+    const principal = [0, 2, 4, 6].includes(m.idx);
+    cells.push({ d, glyph: m.glyph, idx: m.idx, principal, isToday: date.toDateString() === todayKey, name: m.name });
+  }
+  return cells;
+}
+function moonNote(phaseName, moonSign) {
+  const full = phaseName === "Full Moon";
+  const waxing = phaseName.includes("Waxing") || phaseName === "First Quarter" || phaseName === "New Moon";
+  const base = full ? "emotions run high — release and celebrate" : waxing ? "a window to build and set intentions" : "time to wind down, reflect, and let go";
+  if (!moonSign) return base.charAt(0).toUpperCase() + base.slice(1) + ".";
+  const z = ZODIAC[moonSign];
+  return `With your Moon in ${z.name}, it's ${base}. Your ${z.element.toLowerCase()} feelings ${full ? "peak" : "shift"} now.`;
+}
+
+// --- Magic 8-ball ----------------------------------------------
+const EIGHTBALL = [
+  { t: "It is certain.", k: "yes" }, { t: "Without a doubt.", k: "yes" }, { t: "Yes — definitely.", k: "yes" },
+  { t: "You may rely on it.", k: "yes" }, { t: "As I see it, yes.", k: "yes" }, { t: "Most likely.", k: "yes" },
+  { t: "Outlook good.", k: "yes" }, { t: "Signs point to yes.", k: "yes" },
+  { t: "Reply hazy — try again.", k: "maybe" }, { t: "Ask again later.", k: "maybe" },
+  { t: "Better not tell you now.", k: "maybe" }, { t: "Cannot predict now.", k: "maybe" },
+  { t: "Concentrate and ask again.", k: "maybe" },
+  { t: "Don't count on it.", k: "no" }, { t: "My reply is no.", k: "no" }, { t: "My sources say no.", k: "no" },
+  { t: "Outlook not so good.", k: "no" }, { t: "Very doubtful.", k: "no" },
+];
+
+// --- Aura of the day -------------------------------------------
+function auraOfDay(sign, mood) {
+  const seed = hashString((sign || "x") + dayKey(0) + (mood || ""));
+  const h1 = seed % 360;
+  const h2 = (h1 + 40 + (seed % 80)) % 360;
+  const from = `hsl(${h1} 80% 62%)`, via = `hsl(${(h1 + h2) / 2} 75% 55%)`, to = `hsl(${h2} 70% 42%)`;
+  const labels = ["Luminous", "Velvet", "Electric", "Oceanic", "Ember", "Twilight", "Aurora", "Mystic"];
+  return { from, via, to, label: labels[seed % labels.length] };
+}
+
+// --- Planetary days (cosmic to-do) -----------------------------
+const PLANET_DAY = [
+  { planet: "Sun", theme: "Vitality & self", glyph: "☉", suggest: "Do one thing purely for joy or recognition." },
+  { planet: "Moon", theme: "Care & rest", glyph: "☽", suggest: "Tend your home, family, or inner world." },
+  { planet: "Mars", theme: "Action & drive", glyph: "♂", suggest: "Tackle the hard task or move your body." },
+  { planet: "Mercury", theme: "Mind & messages", glyph: "☿", suggest: "Send the email, study, or organize." },
+  { planet: "Jupiter", theme: "Growth & luck", glyph: "♃", suggest: "Expand — learn, plan, or take a good risk." },
+  { planet: "Venus", theme: "Love & beauty", glyph: "♀", suggest: "Connect, create, or treat yourself well." },
+  { planet: "Saturn", theme: "Structure & focus", glyph: "♄", suggest: "Finish a chore or set a boundary." },
+];
+
+// --- Synastry breakdown ----------------------------------------
+function synastry(a, b) {
+  const base = compatibility(a, b).score;
+  const za = ZODIAC[a], zb = ZODIAC[b];
+  const airy = ["Air", "Fire"].filter((e) => [za.element, zb.element].includes(e)).length;
+  const ai = SIGN_KEYS.indexOf(a), bi = SIGN_KEYS.indexOf(b);
+  const dist = Math.min((ai - bi + 12) % 12, (bi - ai + 12) % 12);
+  const clamp = (n) => Math.max(20, Math.min(99, Math.round(n)));
+  return {
+    Communication: clamp(base + airy * 6 - (za.element === "Water" && zb.element === "Earth" ? 8 : 0)),
+    Romance: clamp(base + (dist === 6 ? 10 : 0) - (a === b ? 4 : 0)),
+    Friendship: clamp(base + (za.element === zb.element ? 8 : 0)),
+    Chaos: clamp(40 + (za.modality === zb.modality ? 22 : 0) + (dist === 6 ? 18 : 0) - airy * 4),
+  };
+}
+const SYN_COLOR = { Communication: "var(--air)", Romance: "var(--fire)", Friendship: "var(--earth)", Chaos: "var(--iris-soft)" };
+
 // --- Safe storage (localStorage with in-memory fallback) -------
 const memStore = {};
 const safeStorage = {
@@ -393,6 +524,7 @@ const STORAGE_KEY = "astrarium.profiles.v1";
 // --- Context ---------------------------------------------------
 const AstroContext = createContext(null);
 const useAstro = () => useContext(AstroContext);
+const COVEN_KEY = "astrarium.coven.v1";
 
 function AstroProvider({ children }) {
   const seed = [
@@ -404,26 +536,47 @@ function AstroProvider({ children }) {
     if (raw) { try { const p = JSON.parse(raw); if (Array.isArray(p) && p.length) return p; } catch { /* ignore */ } }
     return seed;
   });
-  const [activeId, setActiveId] = useState(() => {
-    const raw = safeStorage.get(STORAGE_KEY);
-    if (raw) { try { const p = JSON.parse(raw); if (Array.isArray(p) && p.length) return p[0].id; } catch { /* ignore */ } }
-    return seed[0].id;
+  const [activeId, setActiveId] = useState(() => profiles[0]?.id);
+  const [pinned, setPinned] = useState(() => {
+    const raw = safeStorage.get(COVEN_KEY);
+    if (raw) { try { const a = JSON.parse(raw); if (Array.isArray(a)) return a; } catch { /* ignore */ } }
+    return [];
   });
+  const [loading, setLoading] = useState(false);
 
+  // Persist on every change to profiles / coven
   useEffect(() => { safeStorage.set(STORAGE_KEY, JSON.stringify(profiles)); }, [profiles]);
+  useEffect(() => { safeStorage.set(COVEN_KEY, JSON.stringify(pinned)); }, [pinned]);
 
-  const enrich = (p) => ({ ...p, sun: sunSignFromDate(p.birthDate), moon: mockMoonSign(p), rising: mockRisingSign(p) });
+  const enrich = (p) => p && ({ ...p, sun: sunSignFromDate(p.birthDate), moon: mockMoonSign(p), rising: mockRisingSign(p) });
+
+  const selectProfile = (id) => {
+    if (id === activeId) return;
+    setLoading(true);
+    setTimeout(() => { setActiveId(id); setLoading(false); }, 650); // mystical transition
+  };
+
   const value = {
     profiles: profiles.map(enrich),
+    rawProfiles: profiles,
     activeProfile: enrich(profiles.find((p) => p.id === activeId) || profiles[0]),
-    activeId, setActiveId,
-    addProfile(p) { const id = "p-" + Date.now(); setProfiles((prev) => [...prev, { ...p, id }]); setActiveId(id); },
+    activeId, setActiveId, selectProfile, loading,
+    pinned,
+    togglePin(id) { setPinned((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])); },
+    addProfile(p) {
+      const id = "p-" + Date.now();
+      setProfiles((prev) => { const next = [...prev, { ...p, id }]; safeStorage.set(STORAGE_KEY, JSON.stringify(next)); return next; });
+      setActiveId(id);
+    },
     removeProfile(id) {
       setProfiles((prev) => {
         const next = prev.filter((x) => x.id !== id);
+        safeStorage.set(STORAGE_KEY, JSON.stringify(next));
         if (id === activeId && next.length) setActiveId(next[0].id);
         return next;
       });
+      setPinned((prev) => prev.filter((x) => x !== id));
+      try { safeStorage.set(journalKey(id), JSON.stringify([])); } catch { /* ignore */ }
     },
   };
   return <AstroContext.Provider value={value}>{children}</AstroContext.Provider>;
@@ -431,15 +584,43 @@ function AstroProvider({ children }) {
 
 // --- Small UI atoms --------------------------------------------
 function Starfield() {
-  const stars = useMemo(() => Array.from({ length: 70 }, (_, i) => ({
-    id: i, top: Math.random() * 100, left: Math.random() * 100,
-    size: Math.random() * 2 + 1, delay: Math.random() * 4, dur: Math.random() * 3 + 3,
-  })), []);
-  return (
-    <div className="pointer-events-none fixed inset-0" aria-hidden="true">
-      {stars.map((s) => (
+  const farRef = useRef(null);
+  const nearRef = useRef(null);
+  const stars = useMemo(() => {
+    const make = (n, depth) => Array.from({ length: n }, (_, i) => ({
+      id: depth + "-" + i, top: Math.random() * 100, left: Math.random() * 100,
+      size: Math.random() * (depth === "near" ? 2.2 : 1.4) + (depth === "near" ? 1 : 0.6),
+      delay: Math.random() * 4, dur: Math.random() * 3 + 3,
+    }));
+    return { far: make(50, "far"), near: make(26, "near") };
+  }, []);
+  useEffect(() => {
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    let raf = 0;
+    const onMove = (e) => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const x = (e.clientX / window.innerWidth - 0.5);
+        const y = (e.clientY / window.innerHeight - 0.5);
+        if (farRef.current) farRef.current.style.transform = `translate(${x * 12}px, ${y * 12}px)`;
+        if (nearRef.current) nearRef.current.style.transform = `translate(${x * 30}px, ${y * 30}px)`;
+      });
+    };
+    window.addEventListener("mousemove", onMove);
+    return () => { window.removeEventListener("mousemove", onMove); cancelAnimationFrame(raf); };
+  }, []);
+  const layer = (ref, arr) => (
+    <div ref={ref} className="absolute inset-0" style={{ transition: "transform .25s ease-out" }}>
+      {arr.map((s) => (
         <span key={s.id} className="star" style={{ top: `${s.top}%`, left: `${s.left}%`, width: s.size, height: s.size, animationDelay: `${s.delay}s`, animationDuration: `${s.dur}s` }} />
       ))}
+    </div>
+  );
+  return (
+    <div className="pointer-events-none fixed inset-0 overflow-hidden" aria-hidden="true">
+      {layer(farRef, stars.far)}
+      {layer(nearRef, stars.near)}
+      <span className="shoot absolute" style={{ top: "12%", right: "8%", width: 2, height: 2, borderRadius: 9, background: "#fff", boxShadow: "0 0 6px 1px #fff, 60px -36px 0 -1px rgba(255,255,255,0.25)" }} />
     </div>
   );
 }
@@ -464,7 +645,7 @@ function SignGlyph({ sign, size = 26, active }) {
 
 // --- Profile Switcher ------------------------------------------
 function ProfileSwitcher({ onCreate }) {
-  const { profiles, activeProfile, setActiveId } = useAstro();
+  const { profiles, activeProfile, selectProfile } = useAstro();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -489,8 +670,8 @@ function ProfileSwitcher({ onCreate }) {
           <p className="px-2 py-1 text-xs uppercase tracking-wider muted">Switch profile</p>
           <div className="max-h-64 overflow-auto">
             {profiles.map((p) => (
-              <button key={p.id} onClick={() => { setActiveId(p.id); setOpen(false); }}
-                className="focus-ring flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left hover:bg-white/5">
+              <button key={p.id} onClick={() => { selectProfile(p.id); setOpen(false); }}
+                className="focus-ring tap flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left hover:bg-white/5">
                 <SignGlyph sign={p.sun} size={20} active={p.id === activeProfile.id} />
                 <span className="flex-1">
                   <span className="block text-sm">{p.name}</span>
@@ -820,6 +1001,22 @@ function CompatibilityMatrix() {
           <div className="flex items-start gap-2"><Heart size={15} className="gold mt-0.5 shrink-0" /><p className="text-sm lav"><span className="gold">Romance.</span> {result.romance}</p></div>
           <div className="flex items-start gap-2"><Users size={15} className="gold mt-0.5 shrink-0" /><p className="text-sm lav"><span className="gold">Friendship.</span> {result.friendship}</p></div>
         </div>
+
+        <div className="mt-5">
+          <p className="mb-3 text-xs uppercase tracking-wider muted">Synastry breakdown</p>
+          <div className="space-y-2.5">
+            {Object.entries(synastry(p.sun, targetSign)).map(([cat, val]) => (
+              <div key={cat}>
+                <div className="mb-1 flex justify-between text-xs">
+                  <span className="lav">{cat}</span><span className="mono" style={{ color: SYN_COLOR[cat] }}>{val}</span>
+                </div>
+                <div className="overflow-hidden rounded-full" style={{ height: 7, background: "rgba(155,140,232,0.14)" }}>
+                  <div style={{ width: `${val}%`, height: "100%", background: SYN_COLOR[cat], transition: "width .6s ease", borderRadius: 999 }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -844,6 +1041,7 @@ function ScoreRing({ score }) {
 
 // --- Transits Widget -------------------------------------------
 function TransitsWidget() {
+  const { activeProfile: p } = useAstro();
   const phase = useMemo(moonPhase, []);
   const upcoming = useMemo(() => nextPhases(4), []);
   return (
@@ -852,13 +1050,16 @@ function TransitsWidget() {
         <Moon size={18} className="gold" />
         <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Current sky</h2>
       </div>
-      <div className="panel-soft flex items-center gap-4 p-4">
-        <span style={{ fontSize: 42 }} aria-hidden="true">{phase.glyph}</span>
-        <div>
-          <p className="text-xs uppercase tracking-wider muted">Moon phase</p>
-          <p className="text-lg font-medium">{phase.name}</p>
-          <p className="text-xs muted mono">{phase.illum}% illuminated · {phase.age} days old</p>
+      <div className="panel-soft p-4">
+        <div className="flex items-center gap-4">
+          <span style={{ fontSize: 42 }} aria-hidden="true">{phase.glyph}</span>
+          <div>
+            <p className="text-xs uppercase tracking-wider muted">Moon phase</p>
+            <p className="text-lg font-medium">{phase.name}</p>
+            <p className="text-xs muted mono">{phase.illum}% illuminated · {phase.age} days old</p>
+          </div>
         </div>
+        <p className="mt-3 border-t pt-3 text-xs lav hairline">{moonNote(phase.name, p.moon)}</p>
       </div>
 
       <p className="mt-4 mb-2 flex items-center gap-1.5 text-xs uppercase tracking-wider muted"><CalendarDays size={13} className="gold" /> Upcoming phases</p>
@@ -1090,10 +1291,426 @@ function TopBar({ onCreate }) {
   );
 }
 
+// --- Mystical loading overlay ---------------------------------
+function LoadingOverlay() {
+  const { loading } = useAstro();
+  if (!loading) return null;
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center" style={{ background: "rgba(7,6,15,0.78)", backdropFilter: "blur(3px)" }}>
+      <div className="text-center">
+        <svg width="120" height="120" viewBox="0 0 120 120" className="overlay-spin mx-auto">
+          <circle cx="60" cy="60" r="52" fill="none" stroke="rgba(155,140,232,0.2)" strokeWidth="1" />
+          <circle cx="60" cy="60" r="40" fill="none" stroke="rgba(217,176,106,0.4)" strokeWidth="1" strokeDasharray="3 7" />
+          {SIGN_KEYS.map((s, i) => {
+            const a = (i / 12) * 2 * Math.PI - Math.PI / 2;
+            return <text key={s} x={60 + Math.cos(a) * 46} y={60 + Math.sin(a) * 46} textAnchor="middle" dominantBaseline="central"
+              style={{ fontFamily: "Cormorant Garamond, serif", fontSize: 13, fill: "var(--iris-soft)" }}>{ZODIAC[s].glyph}</text>;
+          })}
+        </svg>
+        <p className="display mt-3 text-lg gold">Aligning the stars…</p>
+      </div>
+    </div>
+  );
+}
+
+// --- Retrograde Radar (alert banner) --------------------------
+const RETRO_TIPS = {
+  Mercury: "Back up files, reread before you send, and hold off on signing.",
+  Venus: "Don't impulsively rekindle old flames; revisit budgets instead.",
+  Mars: "Channel friction into refining old plans, not launching new fights.",
+};
+function RetrogradeRadar() {
+  const { activeProfile: p } = useAstro();
+  const active = RETROGRADES.filter((r) => r.status === "Retrograde" && RETRO_TIPS[r.planet]);
+  if (active.length === 0) return null;
+  return (
+    <div className="panel retro-glow mb-4 p-4 fade-up">
+      <div className="flex items-start gap-3">
+        <span className="grid place-items-center rounded-full shrink-0" style={{ width: 36, height: 36, background: "rgba(224,90,90,0.18)" }}>
+          <Orbit size={18} style={{ color: "#e87d7d" }} />
+        </span>
+        <div>
+          <p className="text-sm font-semibold" style={{ color: "#f0a3a3" }}>
+            Retrograde Radar · {active.map((a) => a.planet).join(" & ")} {active.length > 1 ? "are" : "is"} retrograde
+          </p>
+          <ul className="mt-1.5 space-y-1">
+            {active.map((a) => (
+              <li key={a.planet} className="text-xs lav"><span className="gold">{a.planet}.</span> {RETRO_TIPS[a.planet]}</li>
+            ))}
+          </ul>
+          {p.sun && <p className="mt-2 text-xs muted">Tip for {ZODIAC[p.sun].name}: lean on your {ZODIAC[p.sun].element.toLowerCase()} steadiness and avoid rushing decisions.</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Birth Chart Visualizer (Big 3 concentric rings) ----------
+function BirthChartRings() {
+  const { activeProfile: p } = useAstro();
+  const size = 260, c = size / 2;
+  const rings = [
+    { label: "Sun", sign: p.sun, r: 108, Icon: Sun },
+    { label: "Moon", sign: p.moon, r: 80, Icon: Moon },
+    { label: "Rising", sign: p.rising, r: 52, Icon: Sparkles },
+  ];
+  return (
+    <section id="chart" className="panel p-5 sm:p-6 fade-up">
+      <div className="mb-4 flex items-center gap-2">
+        <Compass size={18} className="gold" />
+        <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Birth chart</h2>
+      </div>
+      <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-center">
+        <div style={{ width: "min(260px, 70vw)" }}>
+          <svg width="100%" viewBox={`0 0 ${size} ${size}`} style={{ height: "auto", display: "block" }}>
+            {rings.map((ring) => {
+              if (!ring.sign) return null;
+              const z = ZODIAC[ring.sign];
+              const idx = SIGN_KEYS.indexOf(ring.sign);
+              const ang = (idx / 12) * 2 * Math.PI - Math.PI / 2;
+              const gx = c + Math.cos(ang) * ring.r, gy = c + Math.sin(ang) * ring.r;
+              const col = ELEMENT_COLOR[z.element];
+              return (
+                <g key={ring.label}>
+                  <circle cx={c} cy={c} r={ring.r} fill="none" stroke={col} strokeOpacity="0.45" strokeWidth="1.5" />
+                  <circle cx={gx} cy={gy} r="16" fill="var(--midnight)" stroke={col} strokeWidth="1.5" />
+                  <text x={gx} y={gy} textAnchor="middle" dominantBaseline="central" style={{ fontFamily: "Cormorant Garamond, serif", fontSize: 18, fill: col }}>{z.glyph}</text>
+                </g>
+              );
+            })}
+            <circle cx={c} cy={c} r="6" fill="var(--gold-bright)" />
+          </svg>
+        </div>
+        <div className="w-full space-y-2 sm:w-auto sm:flex-1">
+          {rings.map((ring) => (
+            <div key={ring.label} className="panel-soft flex items-center gap-3 p-3">
+              <ring.Icon size={16} className="gold shrink-0" />
+              <span className="text-xs uppercase tracking-wider muted" style={{ width: 52 }}>{ring.label}</span>
+              {ring.sign ? (
+                <>
+                  <SignGlyph sign={ring.sign} size={20} />
+                  <span className="text-sm font-medium">{ZODIAC[ring.sign].name}</span>
+                  <span className="ml-auto"><ElementBadge element={ZODIAC[ring.sign].element} withLabel={false} /></span>
+                </>
+              ) : <span className="text-sm muted">Add birth time</span>}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// --- Numerology ------------------------------------------------
+function NumerologyModule() {
+  const { activeProfile: p } = useAstro();
+  const lp = lifePath(p.birthDate);
+  const exp = nameNumber(p.name);
+  const py = personalYear(p.birthDate);
+  const items = [
+    { label: "Life path", n: lp, sub: "Your core journey, from birth date" },
+    { label: "Expression", n: exp, sub: "Your nature, from your name" },
+    { label: "Personal year", n: py, sub: `Your ${new Date().getFullYear()} theme` },
+  ];
+  return (
+    <section id="numerology" className="panel p-5 sm:p-6 fade-up">
+      <div className="mb-4 flex items-center gap-2">
+        <Sparkles size={18} className="gold" />
+        <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Numerology</h2>
+      </div>
+      <div className="space-y-2.5">
+        {items.map((it) => (
+          <div key={it.label} className="panel-soft flex items-center gap-4 p-3.5">
+            <span className="display grid place-items-center rounded-2xl shrink-0" style={{ width: 56, height: 56, background: "var(--plum)", fontSize: 28, fontWeight: 600, color: "var(--gold-bright)" }}>
+              {it.n ?? "—"}
+            </span>
+            <div>
+              <p className="text-xs uppercase tracking-wider muted">{it.label} · {it.sub}</p>
+              <p className="text-sm" style={{ color: "var(--starlight)" }}>{it.n ? NUM_MEANING[it.n] : "Add birth details to reveal."}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// --- Aura of the Day (dynamic gradient orb) -------------------
+function AuraOrb() {
+  const { activeProfile: p } = useAstro();
+  const mood = p.sun ? composeHoroscope(p.sun, "daily", 0, p.name).mood : "";
+  const aura = useMemo(() => auraOfDay(p.sun, mood), [p.sun, mood]);
+  const [saved, setSaved] = useState(false);
+  const save = () => {
+    try {
+      const cv = document.createElement("canvas"); cv.width = 512; cv.height = 512;
+      const ctx = cv.getContext("2d");
+      ctx.fillStyle = "#0a0a14"; ctx.fillRect(0, 0, 512, 512);
+      const g = ctx.createRadialGradient(200, 180, 30, 256, 256, 280);
+      g.addColorStop(0, aura.from); g.addColorStop(0.55, aura.via); g.addColorStop(1, aura.to);
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(256, 256, 200, 0, Math.PI * 2); ctx.fill();
+      const a = document.createElement("a");
+      a.href = cv.toDataURL("image/png"); a.download = `aura-${p.name}-${dayKey(0)}.png`; a.click();
+    } catch { /* download blocked in sandbox */ }
+    setSaved(true); setTimeout(() => setSaved(false), 1800);
+  };
+  return (
+    <section className="panel p-5 sm:p-6 fade-up">
+      <div className="mb-4 flex items-center gap-2">
+        <Sun size={18} className="gold" />
+        <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Aura of the day</h2>
+      </div>
+      <div className="flex flex-col items-center gap-4 sm:flex-row">
+        <div className="orb-float grid place-items-center rounded-full shrink-0" style={{
+          width: 130, height: 130,
+          background: `radial-gradient(circle at 32% 30%, ${aura.from}, ${aura.via} 55%, ${aura.to})`,
+          boxShadow: `0 0 50px -6px ${aura.via}, inset 0 0 30px -8px rgba(255,255,255,0.4)`,
+        }} />
+        <div className="flex-1 text-center sm:text-left">
+          <p className="display text-2xl" style={{ fontWeight: 600 }}>{aura.label}</p>
+          <p className="mt-1 text-sm lav">Your energy reads <span className="gold">{mood || "—"}</span> today — a one-of-a-kind hue cast from your sign and the date.</p>
+          <button onClick={save} className="btn-ghost focus-ring mt-3 inline-flex items-center gap-1.5 px-4 py-2 text-sm">
+            {saved ? <><Check size={14} className="gold" /> Saved</> : <><Copy size={14} /> Save orb</>}
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// --- Cosmic To-Do (planetary days) ----------------------------
+function CosmicTodo() {
+  const { activeProfile: p } = useAstro();
+  const ruler = PLANET_DAY[new Date().getDay()];
+  const [items, setItems] = useState([]);
+  const [text, setText] = useState("");
+  useEffect(() => { setItems(loadList("todos", p.id)); setText(""); }, [p.id]);
+  const persist = (next) => { setItems(next); saveList("todos", p.id, next); };
+  const add = (t) => { const v = (t || text).trim(); if (!v) return; persist([{ id: Date.now(), text: v, done: false }, ...items]); setText(""); };
+  const toggle = (id) => persist(items.map((i) => (i.id === id ? { ...i, done: !i.done } : i)));
+  const remove = (id) => persist(items.filter((i) => i.id !== id));
+  return (
+    <section id="todo" className="panel p-5 sm:p-6 fade-up">
+      <div className="mb-4 flex items-center gap-2">
+        <Check size={18} className="gold" />
+        <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Cosmic to-do</h2>
+      </div>
+      <div className="panel-soft mb-3 flex items-center gap-3 p-3">
+        <span className="glyph grid place-items-center rounded-full shrink-0" style={{ width: 38, height: 38, background: "var(--plum)", fontSize: 20, color: "var(--gold-bright)" }}>{ruler.glyph}</span>
+        <div className="flex-1">
+          <p className="text-xs uppercase tracking-wider muted">{new Date().toLocaleDateString(undefined, { weekday: "long" })} · ruled by {ruler.planet}</p>
+          <p className="text-sm">{ruler.suggest}</p>
+        </div>
+        <button onClick={() => add(ruler.suggest)} className="btn-ghost focus-ring shrink-0 rounded-full p-2" title="Add as task"><Plus size={16} /></button>
+      </div>
+      <div className="flex gap-2">
+        <input className="field tap px-3 py-2.5" placeholder="Add an aligned task…" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
+        <button onClick={() => add()} disabled={!text.trim()} className="btn-gold focus-ring tap px-4" style={{ opacity: text.trim() ? 1 : 0.5 }}><Plus size={16} /></button>
+      </div>
+      <div className="mt-3 space-y-2">
+        {items.length === 0 ? (
+          <p className="text-xs muted">No tasks yet — try the {ruler.planet}-day suggestion above.</p>
+        ) : items.map((i) => (
+          <div key={i.id} className="panel-soft flex items-center gap-3 p-2.5">
+            <button onClick={() => toggle(i.id)} className="focus-ring grid place-items-center rounded-md shrink-0" style={{ width: 22, height: 22, border: "1px solid var(--line)", background: i.done ? "var(--gold)" : "transparent" }}>
+              {i.done && <Check size={14} style={{ color: "#2a1c05" }} />}
+            </button>
+            <span className={`flex-1 text-sm ${i.done ? "muted" : ""}`} style={{ textDecoration: i.done ? "line-through" : "none" }}>{i.text}</span>
+            <button onClick={() => remove(i.id)} className="focus-ring rounded-full p-1.5 hover:bg-white/5"><Trash2 size={13} className="muted" /></button>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// --- Lucky 8-ball ---------------------------------------------
+function EightBall() {
+  const [answer, setAnswer] = useState(null);
+  const [shaking, setShaking] = useState(false);
+  const kColor = { yes: "var(--earth)", no: "var(--fire)", maybe: "var(--air)" };
+  const ask = () => {
+    if (shaking) return;
+    setShaking(true); setAnswer(null);
+    setTimeout(() => { setAnswer(EIGHTBALL[Math.floor(Math.random() * EIGHTBALL.length)]); setShaking(false); }, 600);
+  };
+  return (
+    <section id="eightball" className="panel p-5 sm:p-6 fade-up">
+      <div className="mb-4 flex items-center gap-2">
+        <Star size={18} className="gold" />
+        <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Lucky 8-ball</h2>
+      </div>
+      <div className="flex flex-col items-center">
+        <button onClick={ask} aria-label="Shake the 8-ball" className={`focus-ring grid place-items-center rounded-full ${shaking ? "shaking" : ""}`}
+          style={{ width: 160, height: 160, background: "radial-gradient(circle at 34% 30%, #3a3358, #0c0b1a 72%)", boxShadow: "inset 0 0 30px -6px rgba(255,255,255,0.15), 0 16px 40px -16px #000" }}>
+          <span className="grid place-items-center rounded-full" style={{ width: 92, height: 92, background: "radial-gradient(circle at 40% 35%, #241d44, #14122b)", border: "1px solid var(--line)" }}>
+            {answer ? (
+              <span className="px-2 text-center fade-up" style={{ fontSize: 11, lineHeight: 1.25, color: kColor[answer.k] }}>{answer.t}</span>
+            ) : (
+              <span className="display" style={{ fontSize: 40, color: "var(--gold-bright)" }}>8</span>
+            )}
+          </span>
+        </button>
+        <p className="mt-4 text-sm muted">{shaking ? "Swirling the cosmos…" : answer ? "Tap to ask again" : "Hold a question in mind, then tap the ball"}</p>
+      </div>
+    </section>
+  );
+}
+
+// --- Tarot 3-card reading -------------------------------------
+const SPREAD = ["Past", "Present", "Future"];
+function TarotReading() {
+  const [cards, setCards] = useState(null);
+  const [flipped, setFlipped] = useState([false, false, false]);
+  const draw = () => {
+    const deck = [...TAROT].sort(() => Math.random() - 0.5).slice(0, 3);
+    setCards(deck); setFlipped([false, false, false]);
+  };
+  const flip = (i) => setFlipped((f) => f.map((v, idx) => (idx === i ? true : v)));
+  return (
+    <section id="reading" className="panel p-5 sm:p-6 fade-up">
+      <div className="mb-4 flex items-center gap-2">
+        <Wand2 size={18} className="gold" />
+        <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Tarot reading</h2>
+        <button onClick={draw} className="btn-ghost focus-ring ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs">
+          {cards ? "Shuffle again" : "Draw spread"}
+        </button>
+      </div>
+      {!cards ? (
+        <p className="text-sm muted">Draw a three-card spread — Past, Present, Future. Tap each card to turn it.</p>
+      ) : (
+        <div className="grid grid-cols-3 gap-2 sm:gap-4">
+          {cards.map((card, i) => (
+            <div key={i} className="flex flex-col items-center">
+              <span className="mb-2 text-xs uppercase tracking-wider muted">{SPREAD[i]}</span>
+              <button onClick={() => flip(i)} className={`flip focus-ring w-full ${flipped[i] ? "is-flipped" : ""}`} style={{ height: 150, maxWidth: 110 }} aria-label={`Reveal ${SPREAD[i]} card`}>
+                <div className="flip-inner">
+                  <div className="flip-face grid place-items-center" style={{ background: "linear-gradient(160deg, var(--plum), var(--midnight))", border: "1px solid var(--line)" }}>
+                    <span className="glyph" style={{ fontSize: 26, color: "var(--gold-bright)" }}>✷</span>
+                  </div>
+                  <div className="flip-face flip-back grid place-items-center p-1.5 text-center" style={{ background: "linear-gradient(160deg, #211a3e, var(--midnight))", border: "1px solid rgba(217,176,106,0.35)" }}>
+                    <span className="glyph" style={{ fontSize: 30, color: "var(--gold-bright)" }}>{card.glyph}</span>
+                  </div>
+                </div>
+              </button>
+              {flipped[i] && (
+                <div className="mt-2 text-center fade-up">
+                  <p className="display text-sm gold" style={{ fontWeight: 600 }}>{card.name}</p>
+                  <p className="mt-0.5 text-[11px] muted leading-snug">{card.meaning}</p>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// --- Lunar Calendar -------------------------------------------
+function LunarCalendar() {
+  const [view, setView] = useState(() => new Date());
+  const cells = useMemo(() => buildMonth(view), [view]);
+  const move = (delta) => { const d = new Date(view); d.setMonth(d.getMonth() + delta); setView(d); };
+  const monthName = view.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  return (
+    <section id="lunar" className="panel p-5 sm:p-6 fade-up">
+      <div className="mb-4 flex items-center gap-2">
+        <CalendarDays size={18} className="gold" />
+        <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Lunar calendar</h2>
+        <div className="ml-auto flex items-center gap-1">
+          <button onClick={() => move(-1)} className="btn-ghost focus-ring tap rounded-full px-3 py-1.5 text-sm" aria-label="Previous month">‹</button>
+          <button onClick={() => move(1)} className="btn-ghost focus-ring tap rounded-full px-3 py-1.5 text-sm" aria-label="Next month">›</button>
+        </div>
+      </div>
+      <p className="mb-3 text-sm lav">{monthName}</p>
+      <div className="grid grid-cols-7 gap-1 text-center">
+        {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <span key={i} className="text-[10px] uppercase muted">{d}</span>)}
+        {cells.map((cell, i) => (
+          cell ? (
+            <div key={i} className="flex flex-col items-center justify-center rounded-lg py-1.5" title={`${cell.d}: ${cell.name}`}
+              style={{ background: cell.isToday ? "var(--plum)" : "transparent", border: cell.principal ? "1px solid rgba(217,176,106,0.4)" : "1px solid transparent" }}>
+              <span style={{ fontSize: 16 }} aria-hidden="true">{cell.glyph}</span>
+              <span className={`text-[10px] ${cell.isToday ? "gold" : "muted"}`}>{cell.d}</span>
+            </div>
+          ) : <span key={i} />
+        ))}
+      </div>
+      <p className="mt-3 text-[11px] muted">Gold outline marks New, First-Quarter, Full &amp; Last-Quarter days.</p>
+    </section>
+  );
+}
+
+// --- Coven / Inner Circle -------------------------------------
+function CovenMode() {
+  const { profiles, pinned, togglePin, activeProfile: me } = useAstro();
+  const circle = profiles.filter((p) => pinned.includes(p.id));
+  const dynamics = circle.filter((p) => p.id !== me.id && p.sun && me.sun).map((p) => {
+    const score = compatibility(me.sun, p.sun).score;
+    const todayScore = composeHoroscope(p.sun, "daily", 0, p.name).score;
+    const status = score >= 72 ? "Thriving" : score >= 55 ? "Steady" : "Clashing";
+    return { p, score, todayScore, status };
+  });
+  const avg = dynamics.length ? Math.round(dynamics.reduce((a, d) => a + d.score, 0) / dynamics.length) : null;
+  const statusColor = { Thriving: "var(--earth)", Steady: "var(--air)", Clashing: "var(--fire)" };
+  return (
+    <section id="coven" className="panel p-5 sm:p-6 fade-up">
+      <div className="mb-4 flex items-center gap-2">
+        <Users size={18} className="gold" />
+        <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Inner circle</h2>
+      </div>
+      {avg != null && (
+        <div className="panel-soft mb-3 flex items-center gap-3 p-3">
+          <Heart size={16} className="gold" />
+          <p className="text-sm">Group harmony with your circle: <span className="gold">{avg}</span>
+            <span className="muted"> · {avg >= 70 ? "the stars are smiling on you all" : avg >= 55 ? "a balanced, workable mix" : "spicy dynamics today"}</span></p>
+        </div>
+      )}
+      <p className="mb-2 text-xs uppercase tracking-wider muted">Pin people to your circle</p>
+      <div className="mb-4 flex flex-wrap gap-2">
+        {profiles.map((p) => {
+          const on = pinned.includes(p.id);
+          return (
+            <button key={p.id} onClick={() => togglePin(p.id)} className={`focus-ring flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition ${on ? "tab-active" : "chip"}`}>
+              <Star size={12} style={{ fill: on ? "#2a1c05" : "none" }} /> {p.name}
+            </button>
+          );
+        })}
+      </div>
+      {circle.length === 0 ? (
+        <p className="text-sm muted">Pin friends or partners above to see how your signs play together today.</p>
+      ) : (
+        <div className="space-y-2">
+          {circle.map((p) => {
+            const dyn = dynamics.find((d) => d.p.id === p.id);
+            const isMe = p.id === me.id;
+            return (
+              <div key={p.id} className="panel-soft flex items-center gap-3 p-3">
+                <SignGlyph sign={p.sun} size={22} active={isMe} />
+                <div className="flex-1">
+                  <p className="text-sm font-medium">{p.name} {isMe && <span className="gold text-xs">· you</span>}</p>
+                  <p className="text-xs muted">{p.sun ? `${ZODIAC[p.sun].name} · today's energy ${composeHoroscope(p.sun, "daily", 0, p.name).score}` : "Add birth date"}</p>
+                </div>
+                {dyn && (
+                  <span className="rounded-full px-2.5 py-1 text-xs" style={{ color: statusColor[dyn.status], border: `1px solid ${statusColor[dyn.status]}40` }}>
+                    {dyn.status} · {dyn.score}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 // --- Mobile quick-nav -----------------------------------------
 const NAV = [
-  ["horoscope", "Horoscope"], ["tarot", "Tarot"], ["match", "Match"],
-  ["oracle", "Oracle"], ["journal", "Journal"], ["sky", "Sky"], ["signs", "Signs"],
+  ["horoscope", "Horoscope"], ["chart", "Chart"], ["numerology", "Numerology"],
+  ["tarot", "Card"], ["reading", "Reading"], ["match", "Match"], ["coven", "Circle"],
+  ["oracle", "Oracle"], ["eightball", "8-Ball"], ["todo", "To-do"],
+  ["journal", "Journal"], ["lunar", "Lunar"], ["sky", "Sky"], ["signs", "Signs"],
 ];
 function QuickNav() {
   const go = (id) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1113,28 +1730,36 @@ function Dashboard() {
     <div className="astra-root">
       <GlobalStyles />
       <Starfield />
+      <LoadingOverlay />
       <TopBar onCreate={() => setModal(true)} />
       <main className="relative mx-auto max-w-6xl px-4 pb-16 sm:px-6">
         <WelcomeHeader />
-        <div className="mt-4">
-          <QuickNav />
-        </div>
+        <div className="mt-4"><QuickNav /></div>
+        <RetrogradeRadar />
         <div className="mt-2 grid grid-cols-1 gap-6 lg:grid-cols-3">
           <div className="space-y-6 lg:col-span-2">
             <HoroscopeModule />
-            <TarotCard />
+            <BirthChartRings />
             <CompatibilityMatrix />
-            <AskTheStars />
+            <TarotReading />
+            <CovenMode />
             <ZodiacDeepDive />
           </div>
           <div className="space-y-6">
+            <AuraOrb />
             <TransitsWidget />
+            <NumerologyModule />
+            <TarotCard />
+            <EightBall />
+            <AskTheStars />
+            <CosmicTodo />
+            <LunarCalendar />
             <CosmicJournal />
             <ManageProfiles />
           </div>
         </div>
         <footer className="mt-10 text-center text-xs muted">
-          For wonder, not divination · Moon &amp; Rising are playful estimates
+          For wonder, not divination · Moon, Rising &amp; numerology are playful estimates
         </footer>
       </main>
       <CreateProfileModal open={modal} onClose={() => setModal(false)} />
