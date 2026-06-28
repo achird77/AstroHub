@@ -9,7 +9,6 @@ import {
 } from "lucide-react";
 
 /* ============================================================
-   Test
    ASTRARIUM — A Celestial Astrology Dashboard
    Single-file React app. Styling: injected CSS tokens + Tailwind
    utilities for layout. Colors live in CSS variables so the
@@ -138,8 +137,14 @@ function GlobalStyles() {
       .overlay-spin { animation: overlay-spin 2.4s linear infinite; transform-origin: center; }
       @keyframes shoot { 0% { transform: translate(0,0); opacity: 0; } 8% { opacity: 1; } 100% { transform: translate(-260px,160px); opacity: 0; } }
       .shoot { animation: shoot 3.2s linear infinite; }
+      @keyframes welcome-in { 0% { opacity: 0; transform: scale(.92); } 16% { opacity: 1; transform: scale(1); } 78% { opacity: 1; } 100% { opacity: 0; transform: scale(1.05); } }
+      .welcome-anim { animation: welcome-in 1.8s ease forwards; }
+      @keyframes burst-fly { 0% { opacity: 0; transform: translate(0,0) scale(.2); } 18% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--bx), var(--by)) scale(1); } }
+      .burst-star { animation: burst-fly 1.2s ease-out forwards; }
+      @keyframes ring-grow { 0% { opacity: .8; transform: scale(.2); } 100% { opacity: 0; transform: scale(2.4); } }
+      .ring-grow { animation: ring-grow 1.1s ease-out forwards; }
       @media (prefers-reduced-motion: reduce) {
-        .shaking, .orb-float, .retro-glow, .overlay-spin, .shoot { animation: none !important; }
+        .shaking, .orb-float, .retro-glow, .overlay-spin, .shoot, .welcome-anim, .burst-star, .ring-grow { animation: none !important; }
       }
     `}</style>
   );
@@ -673,8 +678,8 @@ async function hashPassword(pw) {
   } catch { return "fallback-" + hashString(pw + PW_SALT); }
 }
 const SEED_USERS = [
-  { id: "u-admin", username: "admin", displayName: "Admin", role: "admin", passHash: "6c9ebee13a74cd96bc404a79ee561e4e19cb2069602fa6bc2cf1d20317a6bcd3", createdAt: 0 },
-  { id: "u-demo", username: "stargazer", displayName: "Stargazer", role: "user", passHash: "07ba618296ae395fbc52f95636f2af23782cc4e4492db946a785c3129f909cf6", createdAt: 0 },
+  { id: "u-admin", username: "admin", displayName: "Admin", role: "admin", passHash: "6c9ebee13a74cd96bc404a79ee561e4e19cb2069602fa6bc2cf1d20317a6bcd3", createdAt: 0, birthDate: "1988-03-30", birthTime: "08:15", birthLocation: "Geneva, CH" },
+  { id: "u-demo", username: "stargazer", displayName: "Stargazer", role: "user", passHash: "07ba618296ae395fbc52f95636f2af23782cc4e4492db946a785c3129f909cf6", createdAt: 0, birthDate: "1995-09-15", birthTime: "19:40", birthLocation: "Kyoto, JP" },
 ];
 
 const AuthContext = createContext(null);
@@ -688,6 +693,7 @@ function AuthProvider({ children }) {
   });
   const [sessionId, setSessionId] = useState(() => safeStorage.get(SESSION_KEY) || null);
   const [viewAs, setViewAs] = useState(null); // admin impersonation (data scope only)
+  const [entering, setEntering] = useState(false); // login/signup animation flag
 
   useEffect(() => { safeStorage.set(USERS_KEY, JSON.stringify(users)); }, [users]);
   useEffect(() => { safeStorage.set(SESSION_KEY, sessionId || ""); }, [sessionId]);
@@ -696,26 +702,34 @@ function AuthProvider({ children }) {
   const isAdmin = currentUser?.role === "admin";
   const effectiveUserId = (isAdmin && viewAs) ? viewAs : sessionId;
   const viewingUser = viewAs ? users.find((u) => u.id === viewAs) : null;
+  const effectiveUser = viewingUser || currentUser;
 
   const value = {
-    users, currentUser, isAdmin, effectiveUserId, viewingUser,
+    users, currentUser, isAdmin, effectiveUserId, viewingUser, effectiveUser, entering,
+    endEntering() { setEntering(false); },
     async login(username, password) {
       const u = users.find((x) => x.username.toLowerCase() === username.trim().toLowerCase());
       if (!u) return { error: "No account with that username." };
       const h = await hashPassword(password);
       if (h !== u.passHash) return { error: "Incorrect password." };
-      setSessionId(u.id); setViewAs(null); return { ok: true };
+      setSessionId(u.id); setViewAs(null); setEntering(true); return { ok: true };
     },
-    async signup({ displayName, username, password }) {
+    async signup({ displayName, username, password, birthDate, birthTime, birthLocation }) {
       const uname = username.trim();
-      if (!uname || !displayName.trim() || !password) return { error: "All fields are required." };
+      if (!uname || !displayName.trim() || !password) return { error: "Name, username and password are required." };
+      if (!birthDate) return { error: "A birth date is needed to cast your chart." };
       if (password.length < 4) return { error: "Password must be at least 4 characters." };
       if (users.some((x) => x.username.toLowerCase() === uname.toLowerCase())) return { error: "That username is taken." };
       const passHash = await hashPassword(password);
-      const u = { id: "u-" + Date.now(), username: uname, displayName: displayName.trim(), role: "user", passHash, createdAt: Date.now() };
-      setUsers((prev) => [...prev, u]); setSessionId(u.id); setViewAs(null); return { ok: true };
+      const id = "u-" + Date.now();
+      const u = { id, username: uname, displayName: displayName.trim(), role: "user", passHash, createdAt: Date.now(), birthDate, birthTime: birthTime || "", birthLocation: birthLocation || "" };
+      // Seed this user's own profile up front so they start with exactly one chart — their own.
+      safeStorage.set(`astrarium.u.${id}.profiles`, JSON.stringify([
+        { id: `${id}__self`, name: displayName.trim(), birthDate, birthTime: birthTime || "", birthLocation: birthLocation || "" },
+      ]));
+      setUsers((prev) => [...prev, u]); setSessionId(id); setViewAs(null); setEntering(true); return { ok: true };
     },
-    logout() { setSessionId(null); setViewAs(null); },
+    logout() { setSessionId(null); setViewAs(null); setEntering(false); },
     impersonate(id) { if (isAdmin) setViewAs(id); },
     stopImpersonating() { setViewAs(null); },
     setRole(id, role) {
@@ -743,13 +757,16 @@ function AuthProvider({ children }) {
 const AstroContext = createContext(null);
 const useAstro = () => useContext(AstroContext);
 
-function AstroProvider({ userId, children }) {
+function AstroProvider({ userId, seedUser, children }) {
   const PKEY = `astrarium.u.${userId}.profiles`;
   const CKEY = `astrarium.u.${userId}.coven`;
-  const seed = [
-    { id: `${userId}__luna`, name: "Luna", birthDate: "1996-07-14", birthTime: "03:20", birthLocation: "Lisbon, PT" },
-    { id: `${userId}__orion`, name: "Orion", birthDate: "1992-11-02", birthTime: "21:45", birthLocation: "Reykjavík, IS" },
-  ];
+  const seed = [{
+    id: `${userId}__self`,
+    name: seedUser?.displayName || "You",
+    birthDate: seedUser?.birthDate || "",
+    birthTime: seedUser?.birthTime || "",
+    birthLocation: seedUser?.birthLocation || "",
+  }];
   const [profiles, setProfiles] = useState(() => {
     const raw = safeStorage.get(PKEY);
     if (raw) { try { const p = JSON.parse(raw); if (Array.isArray(p) && p.length) return p; } catch { /* ignore */ } }
@@ -784,12 +801,17 @@ function AstroProvider({ userId, children }) {
       const id = "p-" + Date.now();
       setProfiles((prev) => { const next = [...prev, { ...p, id }]; safeStorage.set(PKEY, JSON.stringify(next)); return next; });
       setActiveId(id);
+      return id;
+    },
+    updateProfile(id, patch) {
+      setProfiles((prev) => { const next = prev.map((x) => (x.id === id ? { ...x, ...patch } : x)); safeStorage.set(PKEY, JSON.stringify(next)); return next; });
     },
     removeProfile(id) {
       setProfiles((prev) => {
+        if (prev.length <= 1) return prev; // always keep one active profile
         const next = prev.filter((x) => x.id !== id);
         safeStorage.set(PKEY, JSON.stringify(next));
-        if (id === activeId && next.length) setActiveId(next[0].id);
+        if (id === activeId) setActiveId(next[0].id);
         return next;
       });
       setPinned((prev) => prev.filter((x) => x !== id));
@@ -907,20 +929,29 @@ function ProfileSwitcher({ onCreate }) {
   );
 }
 
-// --- Create Profile Modal --------------------------------------
-function CreateProfileModal({ open, onClose }) {
-  const { addProfile } = useAstro();
-  const [form, setForm] = useState({ name: "", birthDate: "", birthTime: "", birthLocation: "" });
-  const [preview, setPreview] = useState(null);
-  useEffect(() => { if (form.birthDate) setPreview(sunSignFromDate(form.birthDate)); else setPreview(null); }, [form.birthDate]);
+// --- Profile Modal (create / edit) -----------------------------
+function ProfileModal({ open, onClose, profile, onSaved }) {
+  const { addProfile, updateProfile } = useAstro();
+  const editing = !!profile;
+  const empty = { name: "", birthDate: "", birthTime: "", birthLocation: "" };
+  const [form, setForm] = useState(empty);
+  useEffect(() => {
+    if (open) setForm(profile ? { name: profile.name, birthDate: profile.birthDate || "", birthTime: profile.birthTime || "", birthLocation: profile.birthLocation || "" } : empty);
+  }, [open, profile]);
+  const preview = form.birthDate ? sunSignFromDate(form.birthDate) : null;
   if (!open) return null;
   const valid = form.name.trim() && form.birthDate;
-  const submit = () => { if (!valid) return; addProfile(form); setForm({ name: "", birthDate: "", birthTime: "", birthLocation: "" }); onClose(); };
+  const submit = () => {
+    if (!valid) return;
+    if (editing) updateProfile(profile.id, form); else addProfile(form);
+    onClose();
+    onSaved?.(editing);
+  };
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: "rgba(7,6,15,0.72)", backdropFilter: "blur(4px)" }}>
       <div className="panel w-full max-w-md p-6 fade-up">
         <div className="mb-5 flex items-center justify-between">
-          <h2 className="display text-2xl" style={{ fontWeight: 600 }}>Cast a new chart</h2>
+          <h2 className="display text-2xl" style={{ fontWeight: 600 }}>{editing ? "Edit chart" : "Cast a new chart"}</h2>
           <button onClick={onClose} className="focus-ring rounded-full p-1.5 hover:bg-white/5"><X size={18} /></button>
         </div>
         <div className="space-y-3">
@@ -950,7 +981,7 @@ function CreateProfileModal({ open, onClose }) {
         )}
         <div className="mt-6 flex justify-end gap-2">
           <button onClick={onClose} className="btn-ghost px-4 py-2 text-sm">Cancel</button>
-          <button onClick={submit} disabled={!valid} className="btn-gold px-5 py-2 text-sm" style={{ opacity: valid ? 1 : 0.5, cursor: valid ? "pointer" : "not-allowed" }}>Save chart</button>
+          <button onClick={submit} disabled={!valid} className="btn-gold px-5 py-2 text-sm" style={{ opacity: valid ? 1 : 0.5, cursor: valid ? "pointer" : "not-allowed" }}>{editing ? "Save changes" : "Save chart"}</button>
         </div>
       </div>
     </div>
@@ -1457,7 +1488,7 @@ function CosmicJournal() {
 }
 
 // --- Manage Profiles strip -------------------------------------
-function ManageProfiles() {
+function ManageProfiles({ onEdit }) {
   const { profiles, removeProfile, activeId } = useAstro();
   return (
     <section className="panel p-5 sm:p-6 fade-up">
@@ -1471,10 +1502,13 @@ function ManageProfiles() {
             <SignGlyph sign={p.sun} size={22} active={p.id === activeId} />
             <div className="flex-1">
               <p className="text-sm font-medium">{p.name} {p.id === activeId && <span className="gold text-xs">· active</span>}</p>
-              <p className="text-xs muted">{p.sun ? ZODIAC[p.sun].name : "Unknown"} · born {p.birthDate || "—"} {p.birthLocation && `· ${p.birthLocation}`}</p>
+              <p className="text-xs muted">{p.sun ? ZODIAC[p.sun].name : "Add birth date"} · born {p.birthDate || "—"} {p.birthLocation && `· ${p.birthLocation}`}</p>
             </div>
+            <button onClick={() => onEdit?.(p)} className="focus-ring rounded-full p-2 hover:bg-white/5" title="Edit chart">
+              <NotebookPen size={15} className="muted" />
+            </button>
             <button onClick={() => removeProfile(p.id)} disabled={profiles.length <= 1}
-              className="focus-ring rounded-full p-2 hover:bg-white/5" style={{ opacity: profiles.length <= 1 ? 0.3 : 1, cursor: profiles.length <= 1 ? "not-allowed" : "pointer" }} title="Remove chart">
+              className="focus-ring rounded-full p-2 hover:bg-white/5" style={{ opacity: profiles.length <= 1 ? 0.3 : 1, cursor: profiles.length <= 1 ? "not-allowed" : "pointer" }} title={profiles.length <= 1 ? "Keep at least one chart" : "Remove chart"}>
               <Trash2 size={15} className="muted" />
             </button>
           </div>
@@ -1951,6 +1985,48 @@ function AmbientSound() {
   );
 }
 
+// --- Welcome animation (login / signup) -----------------------
+function WelcomeOverlay({ name }) {
+  return (
+    <div className="welcome-anim fixed inset-0 z-[70] grid place-items-center" style={{ background: "radial-gradient(circle at 50% 45%, rgba(42,31,77,0.96), rgba(7,6,15,0.98))" }}>
+      <div className="text-center">
+        <svg width="150" height="150" viewBox="0 0 150 150" className="overlay-spin mx-auto">
+          <circle cx="75" cy="75" r="66" fill="none" stroke="rgba(155,140,232,0.2)" strokeWidth="1" />
+          <circle cx="75" cy="75" r="50" fill="none" stroke="rgba(217,176,106,0.45)" strokeWidth="1" strokeDasharray="3 8" />
+          {SIGN_KEYS.map((s, i) => {
+            const a = (i / 12) * 2 * Math.PI - Math.PI / 2;
+            return <text key={s} x={75 + Math.cos(a) * 58} y={75 + Math.sin(a) * 58} textAnchor="middle" dominantBaseline="central"
+              style={{ fontFamily: "Cormorant Garamond, serif", fontSize: 15, fill: "var(--iris-soft)" }}>{ZODIAC[s].glyph}</text>;
+          })}
+          <text x="75" y="75" textAnchor="middle" dominantBaseline="central" style={{ fontFamily: "Cormorant Garamond, serif", fontSize: 40, fill: "var(--gold-bright)" }}>✦</text>
+        </svg>
+        <p className="display mt-4 text-3xl gold" style={{ fontWeight: 600 }}>Welcome, {name}</p>
+        <p className="text-xs uppercase tracking-[0.3em] muted">the stars have been expecting you</p>
+      </div>
+    </div>
+  );
+}
+
+// --- Profile-created burst ------------------------------------
+function ProfileCreatedBurst() {
+  const stars = useMemo(() => Array.from({ length: 14 }, (_, i) => {
+    const ang = (i / 14) * 2 * Math.PI;
+    const dist = 80 + Math.random() * 70;
+    return { id: i, bx: `${Math.cos(ang) * dist}px`, by: `${Math.sin(ang) * dist}px`, size: 4 + Math.random() * 5 };
+  }), []);
+  return (
+    <div className="pointer-events-none fixed inset-0 z-[65] grid place-items-center" aria-hidden="true">
+      <div className="relative">
+        <span className="ring-grow absolute rounded-full" style={{ width: 80, height: 80, left: -40, top: -40, border: "2px solid var(--gold-bright)" }} />
+        {stars.map((s) => (
+          <span key={s.id} className="burst-star absolute rounded-full" style={{ width: s.size, height: s.size, background: "var(--gold-bright)", boxShadow: "0 0 8px 1px var(--gold-bright)", "--bx": s.bx, "--by": s.by }} />
+        ))}
+        <span className="glyph" style={{ fontSize: 34, color: "var(--gold-bright)" }}>✦</span>
+      </div>
+    </div>
+  );
+}
+
 // --- Mystical loading overlay ---------------------------------
 function LoadingOverlay() {
   const { loading } = useAstro();
@@ -2389,9 +2465,10 @@ function QuickNav() {
 function AuthScreen() {
   const { login, signup } = useAuth();
   const [mode, setMode] = useState("login");
-  const [form, setForm] = useState({ displayName: "", username: "", password: "" });
+  const [form, setForm] = useState({ displayName: "", username: "", password: "", birthDate: "", birthTime: "", birthLocation: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const previewSign = mode === "signup" && form.birthDate ? sunSignFromDate(form.birthDate) : null;
   const submit = async () => {
     setError(""); setBusy(true);
     const res = mode === "login"
@@ -2401,7 +2478,7 @@ function AuthScreen() {
     if (res?.error) setError(res.error);
   };
   return (
-    <main className="relative grid min-h-screen place-items-center px-4">
+    <main className="relative grid min-h-screen place-items-center px-4 py-8">
       <div className="panel w-full max-w-sm p-7 fade-up">
         <div className="mb-6 text-center">
           <span className="mx-auto grid place-items-center rounded-2xl" style={{ width: 52, height: 52, background: "var(--plum)" }}><Sparkles size={26} className="gold" /></span>
@@ -2420,10 +2497,31 @@ function AuthScreen() {
           <Labeled icon={Settings} label="Password">
             <input type="password" className="field px-3 py-2.5" placeholder="••••••" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} onKeyDown={(e) => e.key === "Enter" && submit()} />
           </Labeled>
+          {mode === "signup" && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <Labeled icon={Calendar} label="Birth date">
+                  <input type="date" className="field px-3 py-2.5" value={form.birthDate} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} />
+                </Labeled>
+                <Labeled icon={Clock} label="Birth time">
+                  <input type="time" className="field px-3 py-2.5" value={form.birthTime} onChange={(e) => setForm({ ...form, birthTime: e.target.value })} />
+                </Labeled>
+              </div>
+              <Labeled icon={MapPin} label="Birth location">
+                <input className="field px-3 py-2.5" placeholder="City, Country" value={form.birthLocation} onChange={(e) => setForm({ ...form, birthLocation: e.target.value })} />
+              </Labeled>
+              {previewSign && (
+                <div className="flex items-center gap-2 panel-soft p-2.5">
+                  <SignGlyph sign={previewSign} size={22} active />
+                  <span className="text-sm">Your Sun sign: <span className="gold">{ZODIAC[previewSign].name}</span></span>
+                </div>
+              )}
+            </>
+          )}
         </div>
         {error && <p className="mt-3 text-sm" style={{ color: "#f0a3a3" }}>{error}</p>}
         <button onClick={submit} disabled={busy} className="btn-gold focus-ring mt-5 w-full py-2.5 text-sm" style={{ opacity: busy ? 0.6 : 1 }}>
-          {busy ? "Aligning…" : mode === "login" ? "Enter" : "Create account"}
+          {busy ? "Aligning…" : mode === "login" ? "Enter" : "Create my chart"}
         </button>
         <p className="mt-4 text-center text-sm muted">
           {mode === "login" ? "New here? " : "Already have an account? "}
@@ -2534,11 +2632,13 @@ function ImpersonationBanner() {
 
 // --- App Shell -------------------------------------------------
 function Dashboard() {
-  const [modal, setModal] = useState(false);
+  const [modal, setModal] = useState(null); // null=closed · "new"=create · profile=edit
+  const [burst, setBurst] = useState(false);
   return (
     <>
       <LoadingOverlay />
-      <TopBar onCreate={() => setModal(true)} />
+      {burst && <ProfileCreatedBurst />}
+      <TopBar onCreate={() => setModal("new")} />
       <ImpersonationBanner />
       <main className="relative mx-auto max-w-6xl px-4 pb-16 sm:px-6">
         <WelcomeHeader />
@@ -2573,24 +2673,33 @@ function Dashboard() {
             <CosmicTodo />
             <LunarCalendar />
             <CosmicJournal />
-            <ManageProfiles />
+            <ManageProfiles onEdit={(p) => setModal(p)} />
           </div>
         </div>
         <footer className="mt-10 text-center text-xs muted">
           For wonder, not divination · Astraea, Moon, Rising &amp; numerology are playful guides
         </footer>
       </main>
-      <CreateProfileModal open={modal} onClose={() => setModal(false)} />
+      <ProfileModal
+        open={modal !== null}
+        profile={modal && modal !== "new" ? modal : null}
+        onClose={() => setModal(null)}
+        onSaved={(wasEdit) => { if (!wasEdit) { setBurst(true); setTimeout(() => setBurst(false), 1250); } }}
+      />
     </>
   );
 }
 
 function AppInner() {
-  const { currentUser, effectiveUserId } = useAuth();
+  const { currentUser, effectiveUserId, effectiveUser, entering, endEntering } = useAuth();
+  useEffect(() => {
+    if (entering) { const t = setTimeout(endEntering, 1800); return () => clearTimeout(t); }
+  }, [entering, endEntering]);
   if (!currentUser) return <AuthScreen />;
   return (
-    <AstroProvider key={effectiveUserId} userId={effectiveUserId}>
+    <AstroProvider key={effectiveUserId} userId={effectiveUserId} seedUser={effectiveUser}>
       <Dashboard />
+      {entering && <WelcomeOverlay name={currentUser.displayName} />}
     </AstroProvider>
   );
 }
