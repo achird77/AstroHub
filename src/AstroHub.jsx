@@ -698,8 +698,8 @@ const STORAGE_KEY = "astrarium.profiles.v1";
       update public.profiles set role='admin' where email='you@example.com';
    5. Paste your project URL + anon key below.
    ============================================================ */
-const SUPABASE_URL = "";       // e.g. "https://xxxxx.supabase.co"
-const SUPABASE_ANON_KEY = "";  // your project's anon public key
+const SUPABASE_URL = "https://cbffuwwdkvcgdzolbwzd.supabase.co";       // e.g. "https://xxxxx.supabase.co"
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNiZmZ1d3dka3ZjZ2R6b2xid3pkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2NTI0MzYsImV4cCI6MjA5ODIyODQzNn0.TuniFO6jsMl7TfJI1SGS7u1XwtTidJSAtEaZEEP2IXw";  // your project's anon public key
 const CLOUD = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
 
 let _sbPromise = null;
