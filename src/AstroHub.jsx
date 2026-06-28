@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 
 /* ============================================================
+   Test
    ASTRARIUM — A Celestial Astrology Dashboard
    Single-file React app. Styling: injected CSS tokens + Tailwind
    utilities for layout. Colors live in CSS variables so the
